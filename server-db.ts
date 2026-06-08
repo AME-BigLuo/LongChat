@@ -97,12 +97,20 @@ export const serverDb = {
   // 1. Settings management
   getSettings(): SystemSettings {
     // Read from environment overrides first if configured (best for stateless platforms like Cloudflare)
-    const envKey = process.env.GEMINI_API_KEY;
-    const envBase = process.env.GEMINI_BASE_URL || process.env.API_BASE_URL;
-    const envModel = process.env.LLM_MODEL;
+    let envKey = (process.env.GEMINI_API_KEY || '').trim();
+    envKey = envKey.replace(/^["']|["']$/g, '').trim();
+    if (envKey === 'MY_GEMINI_API_KEY' || envKey === 'YOUR_API_KEY' || envKey === 'MY_API_KEY') {
+      envKey = '';
+    }
+
+    let envBase = (process.env.GEMINI_BASE_URL || process.env.API_BASE_URL || '').trim();
+    envBase = envBase.replace(/^["']|["']$/g, '').trim();
+
+    let envModel = (process.env.LLM_MODEL || '').trim();
+    envModel = envModel.replace(/^["']|["']$/g, '').trim();
 
     return {
-      apiKey: memoryDb.settings.apiKey || (envKey && envKey !== 'MY_GEMINI_API_KEY' ? envKey : ''),
+      apiKey: memoryDb.settings.apiKey || envKey,
       baseUrl: memoryDb.settings.baseUrl || envBase || '',
       model: memoryDb.settings.model || envModel || 'gemini-3.1-flash-lite'
     };

@@ -28,9 +28,18 @@ export function getLLMConfig(): LLMConfig {
   const envBase = (import.meta as any).env.VITE_GEMINI_BASE_URL || '';
   const envModel = (import.meta as any).env.VITE_LLM_MODEL || '';
 
-  const finalKey = localKey || envKey || defaultKey;
+  let finalKey = (localKey || envKey || defaultKey).trim();
+  finalKey = finalKey.replace(/^["']|["']$/g, '').trim();
+  if (finalKey === 'MY_GEMINI_API_KEY' || finalKey === 'YOUR_API_KEY' || finalKey === 'MY_API_KEY') {
+    finalKey = '';
+  }
+
   let finalBase = localBase !== null && localBase !== undefined ? localBase : (envBase || defaultBase);
-  let finalModel = localModel || envModel || defaultModel;
+  if (finalBase) {
+    finalBase = finalBase.trim().replace(/^["']|["']$/g, '').trim();
+  }
+  
+  let finalModel = (localModel || envModel || defaultModel).trim().replace(/^["']|["']$/g, '').trim();
 
   return {
     apiKey: finalKey,
@@ -118,7 +127,7 @@ export function clearLLMConfig() {
   localStorage.removeItem('longmenzhen_model');
 }
 
-// 4. Generate LLM response via browser REST calls (zero server dependencies)
+// 4. Generate LLM response via hybrid proxy + browser REST fallbacks
 export async function generateClientLLMResponse(
   systemInstruction: string,
   prompt: string,
@@ -126,13 +135,48 @@ export async function generateClientLLMResponse(
 ): Promise<string> {
   const config = getLLMConfig();
   const apiKey = config.apiKey;
+  const model = config.model || 'gemini-3.1-flash-lite';
+  const baseUrl = config.baseUrl ? config.baseUrl.trim() : '';
+
+  // Try calling the unified backend chat API proxy first to securely utilize server environment variables
+  try {
+    const response = await fetch('/api/chat', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        systemInstruction,
+        prompt,
+        history,
+        model,
+        baseUrl,
+        apiKey
+      })
+    });
+
+    if (response.ok) {
+      const data = await response.json();
+      if (data && typeof data.content === 'string') {
+        return data.content;
+      }
+    } else {
+      const errJson = await response.json().catch(() => ({}));
+      const errMsg = errJson.error || `HTTP ${response.status}`;
+      if (!apiKey) {
+        throw new Error(errMsg);
+      }
+    }
+  } catch (backendErr: any) {
+    console.warn('[LLM Service] Backend chat proxy failed, trying browser direct request:', backendErr);
+    if (!apiKey) {
+      throw new Error(backendErr.message || '未检测到 API 密钥。请点击页面右上角【适配参数配置 ⚙】并在弹窗内输入您的 Gemini / OpenAI API Key。');
+    }
+  }
 
   if (!apiKey) {
     throw new Error('未检测到 API 密钥。请点击页面右上角【适配参数配置 ⚙】并在弹窗内输入您的 Gemini / OpenAI API Key。');
   }
-
-  const model = config.model || 'gemini-3.1-flash-lite';
-  const baseUrl = config.baseUrl ? config.baseUrl.trim() : '';
 
   // Case A: Custom OpenAI-compatible proxy (e.g. GRS, DeepSeek, OpenRouter, self-host proxy, etc.)
   if (baseUrl) {

@@ -105,6 +105,125 @@ app.post('/api/config', (req, res) => {
   res.json({ success: true, message: '大模型适配与密钥参数更新成功！已持久保存于系统库中。' });
 });
 
+// Proxy route to process client-side chat completions securely utilizing backend environment or stored keys
+app.post('/api/chat', async (req, res) => {
+  try {
+    const { systemInstruction, prompt, history, model, baseUrl, apiKey } = req.body;
+
+    const settings = serverDb.getSettings();
+    let finalApiKey = (apiKey || settings.apiKey || process.env.GEMINI_API_KEY || '').trim();
+
+    // Clean quotes or spaces in case of environment load artifacts
+    finalApiKey = finalApiKey.replace(/^["']|["']$/g, '').trim();
+
+    if (!finalApiKey || finalApiKey === 'MY_GEMINI_API_KEY' || finalApiKey === 'YOUR_API_KEY' || finalApiKey === 'MY_API_KEY') {
+      res.status(400).json({ error: '未检测到 API 密钥。请点击页面右上角【适配参数配置 ⚙】并在弹窗内输入您的 Gemini / OpenAI API Key。' });
+      return;
+    }
+
+    const finalBaseUrl = baseUrl !== undefined ? baseUrl : (settings.baseUrl || '');
+    const finalModelName = model || settings.model || 'gemini-3.1-flash-lite';
+
+    if (finalBaseUrl) {
+      // Direct OpenAI-compatible calling
+      let endpoint = finalBaseUrl;
+      if (!endpoint.endsWith('/chat/completions')) {
+        if (endpoint.endsWith('/')) {
+          endpoint += 'chat/completions';
+        } else if (endpoint.endsWith('/v1')) {
+          endpoint += '/chat/completions';
+        } else {
+          endpoint += '/v1/chat/completions';
+        }
+      }
+
+      const messages: any[] = [{ role: 'system', content: systemInstruction }];
+      if (history && history.length > 0) {
+        history.forEach((h: any) => {
+          messages.push({
+            role: h.role === 'model' || h.role === 'assistant' ? 'assistant' : 'user',
+            content: h.content
+          });
+        });
+      }
+      messages.push({ role: 'user', content: prompt });
+
+      const response = await fetch(endpoint, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${finalApiKey}`
+        },
+        body: JSON.stringify({
+          model: finalModelName,
+          messages: messages,
+          temperature: 0.7
+        })
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`中转平台请求错误 (HTTP ${response.status}): ${errorText}`);
+      }
+
+      const data: any = await response.json();
+      const content = data.choices?.[0]?.message?.content || '';
+      res.json({ content: content.trim() });
+    } else {
+      // Standard official Google Gemini API Endpoint
+      const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${finalModelName}:generateContent?key=${finalApiKey}`;
+      
+      const contents: any[] = [];
+      if (history && history.length > 0) {
+        history.forEach((h: any) => {
+          contents.push({
+            role: h.role === 'model' || h.role === 'assistant' ? 'model' : 'user',
+            parts: [{ text: h.content }]
+          });
+        });
+      }
+      contents.push({
+        role: 'user',
+        parts: [{ text: prompt }]
+      });
+
+      const payload = {
+        contents,
+        systemInstruction: {
+          parts: [{ text: systemInstruction }]
+        },
+        generationConfig: {
+          temperature: 0.7,
+          maxOutputTokens: 2048
+        }
+      };
+
+      const response = await fetch(geminiUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+
+      if (!response.ok) {
+        const errObj = await response.json().catch(() => ({}));
+        const message = errObj.error?.message || `HTTP 错误 ${response.status}`;
+        throw new Error(`Gemini 官方底座报错: ${message}`);
+      }
+
+      const data: any = await response.json();
+      const candidates = data.candidates || [];
+      if (candidates.length === 0) {
+        throw new Error('Gemini API 未返回任何答复候选。可能是请求被安全限制拦截，请微调提示词。');
+      }
+      const txt = candidates[0]?.content?.parts?.[0]?.text || '';
+      res.json({ content: txt.trim() });
+    }
+  } catch (err: any) {
+    console.error('Server Proxy Chat error:', err);
+    res.status(500).json({ error: err.message || '内部服务处理错误' });
+  }
+});
+
 // 2. Administrator Authentication & Segmented Management Dashboard APIs
 app.post('/api/admin/login', (req, res) => {
   const { username, password } = req.body;

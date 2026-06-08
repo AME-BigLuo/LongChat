@@ -1,11 +1,24 @@
+export interface AgentTemplate {
+  id: string;
+  name: string;
+  avatar: string;
+  description: string;
+  style: string;
+  expectedOutcome: string;
+  systemPrompt: string;
+  isCustom?: boolean;
+}
+
 export interface Message {
   id: string;
-  roomId: string;
+  roomId: string; // Corresponds to teahouseId in new architecture
   role: 'creator' | 'participant' | 'agent' | 'system';
   userId: string;
   username: string;
   text: string;
   timestamp: number;
+  agentId?: string; // Track which specific AI created it
+  avatar?: string;  // Track sender emoji avatar
 }
 
 export interface Participant {
