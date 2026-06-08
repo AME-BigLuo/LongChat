@@ -2,6 +2,11 @@ import express from 'express';
 import { createServer } from 'http';
 import { WebSocketServer, WebSocket } from 'ws';
 import path from 'path';
+import dotenv from 'dotenv';
+
+// Load environmental variables
+dotenv.config();
+
 import { GoogleGenAI } from '@google/genai';
 import { Room, RoomSession, Message, Participant } from './src/types';
 import { serverDb } from './server-db';
@@ -170,9 +175,17 @@ app.post('/api/chat', async (req, res) => {
       const content = data.choices?.[0]?.message?.content || '';
       res.json({ content: content.trim() });
     } else {
-      // Standard official Google Gemini API Endpoint
-      const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${finalModelName}:generateContent?key=${finalApiKey}`;
-      
+      // Standard official Google Gemini SDK Flow
+      console.log(`[Server Chat API] Requesting standard Gemini model via SDK: ${finalModelName}`);
+      const ai = new GoogleGenAI({
+        apiKey: finalApiKey,
+        httpOptions: {
+          headers: {
+            'User-Agent': 'aistudio-build'
+          }
+        }
+      });
+
       const contents: any[] = [];
       if (history && history.length > 0) {
         history.forEach((h: any) => {
@@ -187,35 +200,17 @@ app.post('/api/chat', async (req, res) => {
         parts: [{ text: prompt }]
       });
 
-      const payload = {
+      const response = await ai.models.generateContent({
+        model: finalModelName,
         contents,
-        systemInstruction: {
-          parts: [{ text: systemInstruction }]
-        },
-        generationConfig: {
+        config: {
+          systemInstruction,
           temperature: 0.7,
           maxOutputTokens: 2048
         }
-      };
-
-      const response = await fetch(geminiUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
       });
 
-      if (!response.ok) {
-        const errObj = await response.json().catch(() => ({}));
-        const message = errObj.error?.message || `HTTP 错误 ${response.status}`;
-        throw new Error(`Gemini 官方底座报错: ${message}`);
-      }
-
-      const data: any = await response.json();
-      const candidates = data.candidates || [];
-      if (candidates.length === 0) {
-        throw new Error('Gemini API 未返回任何答复候选。可能是请求被安全限制拦截，请微调提示词。');
-      }
-      const txt = candidates[0]?.content?.parts?.[0]?.text || '';
+      const txt = response.text || '';
       res.json({ content: txt.trim() });
     }
   } catch (err: any) {

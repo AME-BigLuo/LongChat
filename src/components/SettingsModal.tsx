@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { Key, Globe, Cpu, Check, HelpCircle } from 'lucide-react';
-import { getLLMConfig, saveLLMConfig, LLMConfig, fetchAvailableModels } from '../llmService';
+import { Key, Globe, Cpu, Check, HelpCircle, Zap, Sliders } from 'lucide-react';
+import { getLLMConfig, saveLLMConfig, LLMConfig, fetchAvailableModels, getCompressionConfig, saveCompressionConfig } from '../llmService';
 
 interface SettingsModalProps {
   onClose: () => void;
@@ -21,6 +21,12 @@ export default function SettingsModal({ onClose, onConfigSaved }: SettingsModalP
   const [isFetchingModels, setIsFetchingModels] = useState(false);
   const [fetchError, setFetchError] = useState<string | null>(null);
 
+  // Dynamic Context Compression & Token Optimizer States
+  const [maxTurns, setMaxTurns] = useState(8);
+  const [compressHtml, setCompressHtml] = useState(true);
+  const [compressLongText, setCompressLongText] = useState(true);
+  const [maxCharLimit, setMaxCharLimit] = useState(350);
+
   useEffect(() => {
     const config = getLLMConfig();
     setApiKey(config.apiKey);
@@ -28,6 +34,13 @@ export default function SettingsModal({ onClose, onConfigSaved }: SettingsModalP
     const base = config.baseUrl || 'https://api.grsai.com/v1';
     setBaseUrl(base);
     setModel(config.model || 'gemini-3.1-flash-lite');
+
+    // Load custom context compression configuration
+    const compConfig = getCompressionConfig();
+    setMaxTurns(compConfig.maxTurns);
+    setCompressHtml(compConfig.compressHtml);
+    setCompressLongText(compConfig.compressLongText);
+    setMaxCharLimit(compConfig.maxCharLimit);
 
     // Auto-detect Provider based on baseUrl
     const bLower = base.toLowerCase();
@@ -104,6 +117,12 @@ export default function SettingsModal({ onClose, onConfigSaved }: SettingsModalP
       apiKey: apiKey.trim(),
       baseUrl: baseUrl.trim(),
       model: model.trim()
+    });
+    saveCompressionConfig({
+      maxTurns,
+      compressHtml,
+      compressLongText,
+      maxCharLimit
     });
     setSaveSuccess(true);
     onConfigSaved();
@@ -317,6 +336,108 @@ export default function SettingsModal({ onClose, onConfigSaved }: SettingsModalP
                 </p>
               )}
             </div>
+          </div>
+
+          {/* 🔋 2. 智能 Token 压缩与上下文省电模式 */}
+          <div className="border-4 border-black p-4 bg-teal-50/20 space-y-3.5" id="settings_compression_box">
+            <h3 className="text-xs font-mono font-black uppercase tracking-wider flex items-center gap-1.5 text-black border-b-2 border-black pb-2">
+              <Zap className="w-4 h-4 text-amber-500 fill-current" />
+              <span>2. 智能 Token 节约与上下文压缩配置 (Token Saving Optimizer)</span>
+            </h3>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4" id="compression_form_inputs">
+              
+              {/* Sliding Window max turns */}
+              <div className="space-y-1.5">
+                <label className="block text-xs font-extrabold text-black flex items-center gap-1">
+                  <Sliders className="w-3.5 h-3.5 text-neutral-600" />
+                  <span>历史对话保留轮数 (Sliding Window Turns)</span>
+                </label>
+                <select
+                  value={maxTurns}
+                  onChange={(e) => setMaxTurns(parseInt(e.target.value, 10))}
+                  className="w-full bg-white border-2 border-black p-2 text-xs font-mono font-bold text-black focus:outline-none cursor-pointer"
+                  id="settings_max_turns_select"
+                >
+                  <option value={4}>4 轮对话 (极度省 Token 🔋)</option>
+                  <option value={6}>6 轮对话 (均衡高效 ⚡)</option>
+                  <option value={8}>8 轮对话 (丰满语义 ☕)</option>
+                  <option value={12}>12 轮对话 (超长语境 📊)</option>
+                  <option value={16}>16 轮对话 (未压缩状态 📈)</option>
+                </select>
+                <p className="text-[10px] text-neutral-500 font-mono leading-tight">
+                  * 仅向大模型附带发送最近设定轮数的对话。轮数越少，Tokens 消耗大幅度呈几何级锐减。
+                </p>
+              </div>
+
+              {/* Excessive messages character limit */}
+              <div className="space-y-1.5">
+                <label className="block text-xs font-extrabold text-black flex items-center gap-1">
+                  <Sliders className="w-3.5 h-3.5 text-neutral-600" />
+                  <span>长消息字符压缩阈值 (Max Message Limits)</span>
+                </label>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="range"
+                    min={150}
+                    max={1000}
+                    step={50}
+                    value={maxCharLimit}
+                    onChange={(e) => setMaxCharLimit(parseInt(e.target.value, 10))}
+                    className="flex-grow accent-black cursor-ew-resize h-1.5 bg-neutral-200 rounded-lg appearance-none"
+                  />
+                  <span className="text-xs font-black font-mono border-2 border-black bg-white px-2 py-0.5 min-w-[70px] text-center shrink-0">
+                    {maxCharLimit} 字
+                  </span>
+                </div>
+                <p className="text-[10px] text-neutral-500 font-mono leading-tight">
+                  * 历史单条发言超出该长度时，中间部分自动截除提炼，省电 70% 避免重复重复拉取。
+                </p>
+              </div>
+
+            </div>
+
+            {/* Checkbox Toggles */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1" id="compression_toggles">
+              
+              {/* Compress HTML sandbox code */}
+              <label className="flex items-start gap-2 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={compressHtml}
+                  onChange={(e) => setCompressHtml(e.target.checked)}
+                  className="mt-0.5 w-4 h-4 accent-black cursor-pointer border-2 border-black"
+                />
+                <div className="flex flex-col">
+                  <span className="text-xs font-bold text-black flex items-center gap-1">
+                    精简沙箱网页原型 HTML 源码
+                  </span>
+                  <span className="text-[10px] text-neutral-500 leading-tight">
+                    历史消息中的大段 <code>```html```</code> 源码智能折叠，<strong>可狂省 90% 以上的无用 Tokens</strong>！
+                  </span>
+                </div>
+              </label>
+
+              {/* Compress excessively long text */}
+              <label className="flex items-start gap-2 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={compressLongText}
+                  onChange={(e) => setCompressLongText(e.target.checked)}
+                  className="mt-0.5 w-4 h-4 accent-black cursor-pointer border-2 border-black"
+                />
+                <div className="flex flex-col">
+                  <span className="text-xs font-bold text-black">
+                    启用历史长文本截断优化
+                  </span>
+                  <span className="text-[10px] text-neutral-500 leading-tight">
+                    淘汰大块历史冗余语料。自动进行掐头去尾压缩，确保首尾逻辑和语义不丢。
+                  </span>
+                </div>
+              </label>
+
+            </div>
+
           </div>
 
           {/* Cloudflare Pages configuration instructions */}

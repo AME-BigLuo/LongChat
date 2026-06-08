@@ -127,6 +127,82 @@ export function clearLLMConfig() {
   localStorage.removeItem('longmenzhen_model');
 }
 
+// 3.5 Context Compression Config Management & Optimization
+export interface CompressionConfig {
+  maxTurns: number;           // Slicing threshold (sliding window, e.g. 4, 8, 12, 16)
+  compressHtml: boolean;      // Strip out huge ```html ... ``` legacy codeblock payloads
+  compressLongText: boolean;  // Truncate individual messages that are excessively long
+  maxCharLimit: number;       // Truncation character threshold (e.g., 300)
+}
+
+export function getCompressionConfig(): CompressionConfig {
+  const localTurns = localStorage.getItem('longmenzhen_compress_maxTurns');
+  const localHtml = localStorage.getItem('longmenzhen_compress_html');
+  const localLongText = localStorage.getItem('longmenzhen_compress_longText');
+  const localCharLimit = localStorage.getItem('longmenzhen_compress_charLimit');
+
+  return {
+    maxTurns: localTurns ? parseInt(localTurns, 10) : 8,
+    compressHtml: localHtml !== 'false', // defaults to true
+    compressLongText: localLongText !== 'false', // defaults to true
+    maxCharLimit: localCharLimit ? parseInt(localCharLimit, 10) : 350
+  };
+}
+
+export function saveCompressionConfig(config: Partial<CompressionConfig>) {
+  if (config.maxTurns !== undefined) localStorage.setItem('longmenzhen_compress_maxTurns', config.maxTurns.toString());
+  if (config.compressHtml !== undefined) localStorage.setItem('longmenzhen_compress_html', config.compressHtml ? 'true' : 'false');
+  if (config.compressLongText !== undefined) localStorage.setItem('longmenzhen_compress_longText', config.compressLongText ? 'true' : 'false');
+  if (config.maxCharLimit !== undefined) localStorage.setItem('longmenzhen_compress_charLimit', config.maxCharLimit.toString());
+}
+
+/**
+ * Intelligent conversation context compression algorithm.
+ * Reduces raw tokens by trimming giant repetitive code blocks and slicing/summarizing excessive verbiage.
+ */
+export function compressHistoryContext(
+  history: { role: 'user' | 'model' | 'assistant'; content: string }[],
+  config: CompressionConfig = getCompressionConfig()
+): { role: 'user' | 'model' | 'assistant'; content: string }[] {
+  if (!history || history.length === 0) return [];
+
+  // Filter out any system logs elements or empty roles to be safe
+  const validHistory = history.filter(h => h.role === 'user' || h.role === 'model' || h.role === 'assistant');
+
+  // Slicing by Sliding Window maxTurns threshold
+  const sliced = validHistory.slice(-config.maxTurns);
+
+  return sliced.map(item => {
+    let content = item.content;
+
+    // 1. Core Sandbox Optimization: Find large ```html ... ``` blocks and strip code to a lightweight tag
+    if (config.compressHtml) {
+      const htmlRegex = /```html([\s\S]*?)```/gi;
+      content = content.replace(htmlRegex, (match, innerCode) => {
+        const rawLen = innerCode.length;
+        if (rawLen > 120) {
+          const rawExcerpt = innerCode.trim().substring(0, 100).replace(/\s+/g, ' ');
+          return `\n\`\`\`html\n<!-- [龙门阵Token精简机制]: 历史网页设计源码已智能折叠(原长 ${rawLen} 字) 摘要: ${rawExcerpt}... -->\n\`\`\`\n`;
+        }
+        return match;
+      });
+    }
+
+    // 2. Generic Message Length Optimization: Truncate texts to maxCharLimit and leave a small context window
+    if (config.compressLongText && content.length > config.maxCharLimit) {
+      const head = content.substring(0, config.maxCharLimit - 70);
+      const tail = content.substring(content.length - 50);
+      const reducedCount = content.length - head.length - tail.length;
+      content = `${head}\n\n[...🍵 龙门阵Token省电技术已自动压缩 ${reducedCount} 字历史过招论点 ...]\n\n${tail}`;
+    }
+
+    return {
+      role: item.role,
+      content
+    };
+  });
+}
+
 // 4. Generate LLM response via hybrid proxy + browser REST fallbacks
 export async function generateClientLLMResponse(
   systemInstruction: string,
@@ -138,6 +214,21 @@ export async function generateClientLLMResponse(
   const model = config.model || 'gemini-3.1-flash-lite';
   const baseUrl = config.baseUrl ? config.baseUrl.trim() : '';
 
+  // Apply context token saving optimization prior to execution
+  let finalHistory = history;
+  if (history && history.length > 0) {
+    const origCharCount = history.reduce((acc, val) => acc + (val.content?.length || 0), 0);
+    const compConfig = getCompressionConfig();
+    finalHistory = compressHistoryContext(history, compConfig);
+    const compCharCount = finalHistory.reduce((acc, val) => acc + (val.content?.length || 0), 0);
+    
+    const savedCount = origCharCount - compCharCount;
+    if (savedCount > 0) {
+      const globalSaved = parseInt(localStorage.getItem('longmenzhen_total_chars_saved') || '0', 10);
+      localStorage.setItem('longmenzhen_total_chars_saved', (globalSaved + savedCount).toString());
+    }
+  }
+
   // Try calling the unified backend chat API proxy first to securely utilize server environment variables
   try {
     const response = await fetch('/api/chat', {
@@ -148,7 +239,7 @@ export async function generateClientLLMResponse(
       body: JSON.stringify({
         systemInstruction,
         prompt,
-        history,
+        history: finalHistory,
         model,
         baseUrl,
         apiKey
@@ -193,10 +284,10 @@ export async function generateClientLLMResponse(
 
     console.log(`[Client LLM Proxy] Path: ${endpoint}, model: ${model}`);
 
-    // Map conversation history to OpenAI format
+        // Map conversation history to OpenAI format
     const messages: any[] = [{ role: 'system', content: systemInstruction }];
-    if (history && history.length > 0) {
-      history.forEach(h => {
+    if (finalHistory && finalHistory.length > 0) {
+      finalHistory.forEach(h => {
         messages.push({
           role: h.role === 'model' ? 'assistant' : 'user',
           content: h.content
@@ -235,8 +326,8 @@ export async function generateClientLLMResponse(
 
     // Map conversation history to Gemini format (user -> user, model -> model)
     const contents: any[] = [];
-    if (history && history.length > 0) {
-      history.forEach(h => {
+    if (finalHistory && finalHistory.length > 0) {
+      finalHistory.forEach(h => {
         contents.push({
           role: h.role === 'model' ? 'model' : 'user',
           parts: [{ text: h.content }]

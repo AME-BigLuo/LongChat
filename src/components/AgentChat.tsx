@@ -1,17 +1,18 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { 
   Send, Trash2, Flame, Wine, FileText, CheckCircle2, Copy, Download, 
-  Sparkles, Loader2, RefreshCw, Eye, Code, Play, ExternalLink, Laptop, Globe, Users 
+  Sparkles, Loader2, RefreshCw, Eye, Code, Play, ExternalLink, Laptop, Globe, Users, HelpCircle 
 } from 'lucide-react';
 import { AgentTemplate, Message } from '../types';
 import { generateClientLLMResponse, generateClientSummaryHtml } from '../llmService';
+import { PRESET_TEAHOUSES } from '../data/teahouseData';
 
 interface AgentChatProps {
   teahouseId: string;
   teahouseName: string;
   teahouseIntro: string;
   allAgents: AgentTemplate[]; // Combining both presets and custom guest agents
-  activeAgentIds: string[];   // Currently checknotified agents
+  activeAgentIds: string[];   // Currently checked agents
   userNickname: string;
   onOpenSettings: () => void;
   // External reactive action triggers passed by sidebar quick items
@@ -35,9 +36,38 @@ export default function AgentChat({
   const [loading, setLoading] = useState(false);
   const [thinkingAgent, setThinkingAgent] = useState<string | null>(null);
   const [spicyMode, setSpicyMode] = useState(false);
-  const [autoRoundtable, setAutoRoundtable] = useState(true); // Default sequence roundtable active
+  const [autoRoundtable, setAutoRoundtable] = useState(true); // Now serves as Host dispatch toggle or kept for backward-compatibility
   const [errorMsg, setErrorMsg] = useState('');
+
+  // Real-time Token & Char Optimizations Tracker
+  const [totalSavedChars, setTotalSavedChars] = useState(0);
+
+  useEffect(() => {
+    const updateStats = () => {
+      const stored = parseInt(localStorage.getItem('longmenzhen_total_chars_saved') || '0', 10);
+      setTotalSavedChars(stored);
+    };
+    updateStats();
+    const statsTimer = setInterval(updateStats, 2000);
+    return () => clearInterval(statsTimer);
+  }, []);
   
+  // Custom Host details
+  const activeTeahouse = PRESET_TEAHOUSES.find(t => t.id === teahouseId);
+  const currentHost = activeTeahouse?.host || {
+    id: 'host_fallback',
+    name: '茶馆馆长',
+    avatar: '🤵',
+    role: '司茶 / 雅间调度人',
+    description: '茶馆掌门人，热心协调、倒茶调度并引导聊天话题。',
+    systemPrompt: '你是一位热心的茶铺掌门，调度各位席上茶友。'
+  };
+
+  // Guided Topics State
+  const [suggestions, setSuggestions] = useState<string[]>([]);
+  const [lastInteractionTime, setLastInteractionTime] = useState<number>(Date.now());
+  const [isIdle, setIsIdle] = useState(false);
+
   // Summary outputs
   const [summaryHtml, setSummaryHtml] = useState<string | null>(null);
   const [summarizing, setSummarizing] = useState(false);
@@ -48,8 +78,27 @@ export default function AgentChat({
   
   // Track visual active tab ('text' | 'sandbox' | 'source') per chat message for HTML rendering
   const [messageViewModes, setMessageViewModes] = useState<Record<string, 'text' | 'sandbox' | 'source'>>({});
-
   const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  const initializeWelcomeMessage = (): Message[] => {
+    return [
+      {
+        id: 'init_sys_msg_' + Date.now().toString(36),
+        roomId: teahouseId,
+        role: 'system',
+        userId: 'system_p',
+        username: '茶馆小二',
+        text: `【${teahouseName}】堂口起锅开气，长嘴青铜壶在白沸水中盘旋点花。${teahouseIntro}\n\n💡 席上已为您备好数位各有绝活的茶友，勾选激活他们并提问，即可开始精彩漫漫。`,
+        timestamp: Date.now()
+      }
+    ];
+  };
+
+  const saveHistory = (newMsgs: Message[]) => {
+    setMessages(newMsgs);
+    const historyKey = `longmenzhen_chamber_history_v2_${teahouseId}`;
+    localStorage.setItem(historyKey, JSON.stringify(newMsgs));
+  };
 
   // Load chat history for THIS specific Teahouse chamber on mount & switch
   useEffect(() => {
@@ -57,7 +106,30 @@ export default function AgentChat({
     setSummaryStatusMessage('');
     setDesignatedAgentId(null);
     setErrorMsg('');
+    setLastInteractionTime(Date.now());
+    setIsIdle(false);
     
+    // Set Default suggestions immediately based on the room
+    if (teahouseId === 'th_jinli_memory') {
+      setSuggestions([
+        '请说书老秀才摆一摆成都街巷的奇闻趣事，清清脑壳 👴🏽',
+        '请辣掌柜算一算，我这不温不火的性子如何生财破局 👩🏻‍🍳',
+        '听隐世军师解一解，道家如何借太极“无为”卸掉当下的苦闷 🧘‍♂️'
+      ]);
+    } else if (teahouseId === 'th_cyber_silicon') {
+      setSuggestions([
+        '叫赛博极客代码侠给我现场搓一个好玩的可视化交互网页原型 🧙‍♂️',
+        '呼唤红杉创投硬核心帮我算一算这个方向的付费转化率与生命周期价值 👩🏻‍💼',
+        '听智脑分析姬梳理整个业务流和并发瓶颈，找技术死穴 🦾'
+      ]);
+    } else {
+      setSuggestions([
+        '叫太极道长现场展示肩颈舒展与一分钟太极安神打坐法 📿',
+        '请识药小药童为我调配一剂防熬夜脱发和护肝明目的盖碗茶方 🌿',
+        '请梅花易占师起一个易数吉凶卦，推演当前焦虑行止的周流之变 🌌'
+      ]);
+    }
+
     const historyKey = `longmenzhen_chamber_history_v2_${teahouseId}`;
     const stored = localStorage.getItem(historyKey);
     if (stored) {
@@ -71,46 +143,16 @@ export default function AgentChat({
     }
   }, [teahouseId]);
 
-  // Initial greeting sequence inside this teahouse room
-  const initializeWelcomeMessage = (): Message[] => {
-    const defaultGreetings: Message[] = [
-      {
-        id: 'init_sys_msg_' + Date.now().toString(36),
-        roomId: teahouseId,
-        role: 'system',
-        userId: 'system_p',
-        username: '茶馆小二',
-        text: `【${teahouseName}】堂口起锅开气，长嘴青铜壶在白沸水中盘旋点花。${teahouseIntro}`,
-        timestamp: Date.now()
+  // Idle detection effect to show conversational suggestions proactively after 45 seconds of silence
+  useEffect(() => {
+    const interval = setInterval(() => {
+      const elapsed = Date.now() - lastInteractionTime;
+      if (elapsed > 45000) {
+        setIsIdle(true);
       }
-    ];
-
-    // Let the first active agent offer a friendly opening banter
-    const activeAgents = allAgents.filter(a => activeAgentIds.includes(a.id));
-    const hostAgent = activeAgents[0] || allAgents[0];
-
-    if (hostAgent) {
-      defaultGreetings.push({
-        id: 'init_host_msg_' + Date.now().toString(36),
-        roomId: teahouseId,
-        role: 'agent',
-        userId: hostAgent.id,
-        username: hostAgent.name,
-        agentId: hostAgent.id,
-        avatar: hostAgent.avatar,
-        text: `客官吉祥！我乃『${hostAgent.name}』。本雅间今天的商谈宗旨为《${hostAgent.expectedOutcome || '探索出得体策略'}》。茶座已替您抹匀，清香盖碗茶已经焖上了。请客官尽管先丢个话头，看在野老朽、辣女掌柜和军师们如何为您各抒己见！`,
-        timestamp: Date.now() + 50
-      });
-    }
-
-    return defaultGreetings;
-  };
-
-  const saveHistory = (newMsgs: Message[]) => {
-    setMessages(newMsgs);
-    const historyKey = `longmenzhen_chamber_history_v2_${teahouseId}`;
-    localStorage.setItem(historyKey, JSON.stringify(newMsgs));
-  };
+    }, 5000);
+    return () => clearInterval(interval);
+  }, [lastInteractionTime]);
 
   // Listen to external click triggers on the sidebar ("指名提问 TA" / "请这人插嘴")
   useEffect(() => {
@@ -140,14 +182,22 @@ export default function AgentChat({
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, thinkingAgent]);
 
-  // Handle direct prompt submitting
-  const handleSendMessage = async (e?: React.FormEvent) => {
+  // Handle direct prompt submitting or trigger-based input
+  const handleSendMessage = async (e?: React.FormEvent, directText?: string) => {
     if (e) e.preventDefault();
-    if (!inputValue.trim() || loading) return;
+    
+    const rawInput = directText !== undefined ? directText : inputValue;
+    if (!rawInput.trim() || loading) return;
 
     setErrorMsg('');
-    const typedText = inputValue.trim();
-    setInputValue('');
+    const typedText = rawInput.trim();
+    if (directText === undefined) {
+      setInputValue('');
+    }
+
+    // Reset idle timers
+    setLastInteractionTime(Date.now());
+    setIsIdle(false);
 
     const currentNick = userNickname || '阵主客官';
 
@@ -167,7 +217,7 @@ export default function AgentChat({
 
     try {
       // Check who should respond:
-      // Case 1: Designated specific agent (User focused output)
+      // Case 1: Designated specific agent (User clicked "指指名提问")
       if (designatedAgentId) {
         const targetAg = allAgents.find(a => a.id === designatedAgentId);
         if (targetAg) {
@@ -188,86 +238,199 @@ export default function AgentChat({
           updatedHistory = [...updatedHistory, agMsg];
           saveHistory(updatedHistory);
         }
-        // Remove special focus filter
+        // Remove focus filter
         setDesignatedAgentId(null);
       } 
-      // Case 2: Roundtable multiple responses
+      // Case 2: 🤵🏽 HOST INTERACTING & INTELLIGENT DISPATCHING CHRONICLE
       else {
-        // Find which agents are currently checked inside this teahouse
+        // Find which agents are currently checked inside this teahouse room
         const speakingAgents = allAgents.filter(a => activeAgentIds.includes(a.id));
         
+        // Define Host thinking visual while determining routing
+        setThinkingAgent(`${currentHost.name} (司茶调度中...)`);
+
+        // Format history context for Host
+        const hostHistoryContext = updatedHistory
+          .filter(m => m.role !== 'system')
+          .slice(-10)
+          .map(m => {
+            return {
+              role: m.role === 'creator' ? 'user' as const : 'model' as const,
+              content: `[${m.username}]: ${m.text}`
+            };
+          });
+
         if (speakingAgents.length === 0) {
-          // Fallback to everyone dormant
-          const sysNotice: Message = {
-            id: 'msg_sys_dormant_' + Date.now().toString(36),
-            roomId: teahouseId,
-            role: 'system',
-            userId: 'system_p',
-            username: '茶馆小二',
-            text: '【茶博士温馨提点】您当前关闭了桌面上所有茶友席位，导致没人接话。可以点击左边“席位按钮”唤醒他们同桌共饮哟！',
-            timestamp: Date.now()
-          };
-          saveHistory([...updatedHistory, sysNotice]);
-        } 
-        else if (!autoRoundtable || speakingAgents.length === 1) {
-          // Just let the first speaking agent respond
-          const speaker = speakingAgents[0];
-          setThinkingAgent(speaker.name);
-          const reply = await getSingleAgentResponse(speaker, typedText, updatedHistory);
-          
-          const agMsg: Message = {
-            id: 'msg_a_' + Date.now().toString(36),
+          // Rescue/圆场: Since no other guests are active, the host comes to the rescue to answer directly in chat
+          let hostSystemPromptRescue = `${currentHost.systemPrompt}
+【重要圆场指令】：
+当前雅间里的茶友席位均为空席（客官关闭了座位上所有的茶客），雅间内目前没有在席茶客。
+你作为雅间大堂调度堂倌/主控，必须亲自出来“圆场接客”，以你极具个性的人物语调和智慧给客官进行风趣温馨的直接答复（控制在 120 字内）。
+并同时在末尾附带 “---SUGGESTIONS---” 标识及 3 个全新追问。
+
+【圆场输出格式模板】：
+[你独特的风趣解答与圆场温茶词，控制在 100 字内。绝对不要使用 Markdown 标题，直接段落陈述。]
+
+---SUGGESTIONS---
+- [全新交互追问话题 1]
+- [全新交互追问话题 2]
+- [全新交互追问话题 3]`;
+
+          let hostRescueResponse = '';
+          try {
+            hostRescueResponse = await generateClientLLMResponse(
+              hostSystemPromptRescue,
+              `客官最新言论：“${typedText}”\n有请调度！`,
+              hostHistoryContext
+            );
+          } catch (err: any) {
+            console.error("Rescue host error:", err);
+            hostRescueResponse = `哎呀，茶水滚烫，客官抛出开板高见，瞧把人都说愣了！既然大家还没落座，二娃先给您掺一碗盖碗茶！您可点击下方推荐的话题把高人们唤醒共同开杠。`;
+          }
+
+          const suggestionsRegex = /---SUGGESTIONS---([\s\S]*?)$/i;
+          const suggestionsMatch = hostRescueResponse.match(suggestionsRegex);
+          let parsedHostComment = hostRescueResponse.split(/---SUGGESTIONS---/i)[0]?.trim() || '';
+          parsedHostComment = parsedHostComment.replace(/#+\s+/g, '').replace(/[\*\_]/g, '').trim();
+
+          let parsedSuggestions: string[] = [];
+          if (suggestionsMatch && suggestionsMatch[1]) {
+            parsedSuggestions = suggestionsMatch[1]
+              .split('\n')
+              .map(s => s.trim().replace(/^[-*\d\.\s]+/, ''))
+              .filter(s => s.length > 3 && s.length < 60);
+          }
+          if (parsedSuggestions.length >= 2) {
+            setSuggestions(parsedSuggestions.slice(0, 3));
+          }
+
+          // Append Host Rescue Msg (the only time the host posts a visible chat bubble!)
+          const hostMsg: Message = {
+            id: 'msg_host_rescue_' + Date.now().toString(36),
             roomId: teahouseId,
             role: 'agent',
-            userId: speaker.id,
-            username: speaker.name,
-            agentId: speaker.id,
-            avatar: speaker.avatar,
-            text: reply,
+            userId: currentHost.id,
+            username: currentHost.name,
+            agentId: currentHost.id,
+            avatar: currentHost.avatar,
+            text: parsedHostComment,
             timestamp: Date.now()
           };
-          saveHistory([...updatedHistory, agMsg]);
-        } 
-        else {
-          // 👥 SEQUENCE ROUNDTABLE CYCLE MODE (自动连环开杠)
-          // Each agent speaks sequentially, with the subsequent agents being aware of both user state 
-          // and the previous agents' comments!
-          for (let i = 0; i < speakingAgents.length; i++) {
-            const speaker = speakingAgents[i];
-            setThinkingAgent(speaker.name);
-            
-            // Build special roundtable prompt showing other agents' inputs
-            const currentTurnPrompt = i === 0 
-              ? typedText 
-              : `（前面由于议题讨论，客官对所有人发言说: "${typedText}"。下面上一位茶友发言完毕，轮到你来进行补充或反驳交锋。请开始论证并承接前文。）`;
 
-            const reply = await getSingleAgentResponse(speaker, currentTurnPrompt, updatedHistory);
-            
+          updatedHistory = [...updatedHistory, hostMsg];
+          saveHistory(updatedHistory);
+        } else {
+          // Normal conversation: Host operates silently behind the scenes.
+          const speakingAgentsLabel = speakingAgents
+            .map(a => `ID: "${a.id}" (名称: ${a.name}, 擅长: ${a.expectedOutcome})`)
+            .join('\n');
+
+          let hostSystemPromptDispatch = `【设定与背景】：
+你目前担任雅间主持人/司茶总调度（“${currentHost.name}”）。
+你的重要职责是：
+1. 分析客官最新的输入：“${typedText}”；
+2. 分析当前话题，在目前在座的合格茶客列表中，挑选出应该发言的茶客。
+${autoRoundtable ? '当前由于开启了“自动围炉(连环大唱)”多茶友讨论模式，请挑选【1个至 3个】最相关的茶客，按答复顺序以英文逗号分隔输出 ID。' : '当前为单独答复模式，请挑选【唯一 1 位】最适宜出来作答的茶客 ID。'}
+
+【当前可被调度的合格茶客列表】：
+${speakingAgentsLabel}
+
+【你需要计算并输出的具体格式说明】：
+你必须且只能以下列精确的格式结构输出，不要包含多余的排版或包装词：
+
+---DISPATCH---
+[拼写完全精确的 1 或多个在席茶客 Agent ID，若有多个，采用英文逗号分隔。例如: ${speakingAgents[0]?.id || ''}${autoRoundtable && speakingAgents[1] ? ',' + speakingAgents[1].id : ''}]
+
+---SUGGESTIONS---
+- [针对客官当前聊的话题，写出第 1 个供客官下一步点击继续聊的灵感追问，不超过35字]
+- [针对当前话题，写出第 2 个点击追问，不超过35字]
+- [针对当前话题，写出第 3 个点击追问，不超过35字]`;
+
+          let hostResponse = '';
+          try {
+            hostResponse = await generateClientLLMResponse(
+              hostSystemPromptDispatch,
+              `客官最新言论：“${typedText}”\n有请调度！`,
+              hostHistoryContext
+            );
+          } catch (err: any) {
+            console.error("Host dispatch background error:", err);
+            const defaultId = speakingAgents[0].id;
+            hostResponse = `---DISPATCH---\n${defaultId}\n\n---SUGGESTIONS---\n- 请继续探讨当下的深度细节 🍵\n- 抛出当下面临的具体瓶颈与思路 🚀\n- 听听还有什么别有洞天的奇招 🧘‍♂️`;
+          }
+
+          const dispatchRegex = /---DISPATCH---([\s\S]*?)(?:---|$)/i;
+          const suggestionsRegex = /---SUGGESTIONS---([\s\S]*?)$/i;
+
+          const dispatchMatch = hostResponse.match(dispatchRegex);
+          const suggestionsMatch = hostResponse.match(suggestionsRegex);
+
+          let chosenIdsString = '';
+          if (dispatchMatch && dispatchMatch[1]) {
+            chosenIdsString = dispatchMatch[1].trim().replace(/^[-*\s]+/, '').split('\n')[0].trim();
+          }
+
+          // Split by commas
+          const dispatchedIds = chosenIdsString
+            .split(',')
+            .map(s => s.trim())
+            .filter(id => speakingAgents.some(a => a.id === id));
+
+          // If valid dispatch list is empty, default to first active agent
+          if (dispatchedIds.length === 0) {
+            dispatchedIds.push(speakingAgents[0].id);
+          }
+
+          let parsedSuggestions: string[] = [];
+          if (suggestionsMatch && suggestionsMatch[1]) {
+            parsedSuggestions = suggestionsMatch[1]
+              .split('\n')
+              .map(s => s.trim().replace(/^[-*\d\.\s]+/, ''))
+              .filter(s => s.length > 3 && s.length < 60);
+          }
+
+          if (parsedSuggestions.length >= 2) {
+            setSuggestions(parsedSuggestions.slice(0, 3));
+          }
+
+          // Let the dispatched experts speak sequentially
+          for (let i = 0; i < dispatchedIds.length; i++) {
+            const expertId = dispatchedIds[i];
+            const targetAg = speakingAgents.find(a => a.id === expertId);
+            if (!targetAg) continue;
+
+            setThinkingAgent(targetAg.name);
+
+            // Build a supportive prompt that points out we chose this agent for thematic relevance
+            const promptBooster = `客官提问：“${typedText}”\n请你发挥独特的【${targetAg.name}】身段、语调和专业擅长，犀利或安详地答复客官的话头（务必紧密结合并承接整桌之前所有的论证上下文，拒绝任何多余的客套寒暄或自我介绍背景，直接切入核心分析论点！）。不要超出系统字数设定！`;
+
+            const replyText = await getSingleAgentResponse(targetAg, promptBooster, updatedHistory);
+
             const agMsg: Message = {
-              id: `msg_a_round_${i}_` + Date.now().toString(36),
+              id: `msg_disp_ag_${targetAg.id}_${i}_` + Date.now().toString(36),
               roomId: teahouseId,
               role: 'agent',
-              userId: speaker.id,
-              username: speaker.name,
-              agentId: speaker.id,
-              avatar: speaker.avatar,
-              text: reply,
+              userId: targetAg.id,
+              username: targetAg.name,
+              agentId: targetAg.id,
+              avatar: targetAg.avatar,
+              text: replyText,
               timestamp: Date.now()
             };
 
-            // Propagate forward so next in loop sees this agent's state
             updatedHistory = [...updatedHistory, agMsg];
             saveHistory(updatedHistory);
-            
-            // Brief visual delay between agents speaking
-            await new Promise(resolve => setTimeout(resolve, 600));
+
+            // Pause slightly for reading comfort and realism only if there are more upcoming replies
+            if (i < dispatchedIds.length - 1) {
+              await new Promise(resolve => setTimeout(resolve, 800));
+            }
           }
         }
       }
     } catch (err: any) {
       console.error(err);
       setErrorMsg(err.message || '大模型对话受到阻塞，请检查您的 API 密钥及连接端点连通性。');
-      setInputValue(typedText); // Return the text so user doesn't lose it
     } finally {
       setLoading(false);
       setThinkingAgent(null);
@@ -309,7 +472,7 @@ export default function AgentChat({
     setThinkingAgent(agent.name);
 
     try {
-      const specialSystemPoke = agent.systemPrompt + `\n[特别触发]: 当前议论告一段落，客官对你作了“请Ta插嘴”示意，要求你主动打破沉默，总结或对前面全桌聊的话题作出一两句幽默辛辣、高屋建瓴的短评，或者尖锐拷问！`;
+      const specialSystemPoke = agent.systemPrompt + `\n[特别触发]: 当前议论告一段落，客官对你作了“请Ta插嘴”示意，要求你主动打破沉默，总结或对前面全桌聊的话题作出一两句幽默辛辣、高屋建瓴的短评，或者尖锐拷贝！`;
       
       const historyMapped = messages
         .filter(m => m.role !== 'system')
@@ -422,12 +585,18 @@ export default function AgentChat({
         <div className="flex items-center gap-3">
           <span className="text-3xl bg-amber-100 border-2 border-black p-1.5 shrink-0 block">🧭</span>
           <div>
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
               <h3 className="font-black text-base">{teahouseName}</h3>
               <div className="flex items-center gap-1.5 bg-neutral-900 text-white px-2 py-0.5 text-[9px] font-mono font-bold border border-black">
                 <Users className="w-2.5 h-2.5" />
                 <span>围炉群聊空间</span>
               </div>
+              {currentHost && (
+                <div className="flex items-center gap-1.5 bg-amber-500 text-black px-2 py-0.5 text-[9px] font-mono font-bold border border-black shadow-[1px_1px_0px_rgba(0,0,0,1)]">
+                   <span className="animate-pulse">{currentHost.avatar}</span>
+                  <span>调度总控：{currentHost.name}</span>
+                </div>
+              )}
             </div>
             <p className="text-[11px] text-neutral-600 mt-1 leading-snug font-sans">
               <span className="font-extrabold text-black">雅间调性：</span>{teahouseIntro}
@@ -437,6 +606,18 @@ export default function AgentChat({
 
         {/* Global togglers */}
         <div className="flex items-center gap-2 flex-wrap" id="chat_top_bar_controls">
+          {/* Smart Token Saver Battery Badge */}
+          <button
+            onClick={onOpenSettings}
+            className={`flex items-center gap-1.5 border-2 border-black px-2.5 py-1 text-[10px] font-mono font-bold transition-all cursor-pointer ${
+              totalSavedChars > 0 ? 'bg-emerald-50 text-emerald-950 shadow-[1px_1px_0px_rgba(0,0,0,1)]' : 'bg-teal-50/50 text-teal-800'
+            }`}
+            title="点此配置智能 Token 压缩与滑动历史轮数，拯救您的 Token 钱包！"
+          >
+            <span className={`w-2.5 h-2.5 rounded-full ${totalSavedChars > 0 ? 'bg-emerald-500 animate-pulse' : 'bg-teal-400'} shrink-0`} />
+            <span className="font-extrabold">🔋 {totalSavedChars > 0 ? `已省 ${totalSavedChars} 字符 (~${(totalSavedChars * 0.95).toFixed(0)} Token)` : '智能省电: 已就绪'}</span>
+          </button>
+
           {/* Automatically Roundtable toggler */}
           <button
             onClick={() => setAutoRoundtable(!autoRoundtable)}
@@ -533,7 +714,14 @@ export default function AgentChat({
               {/* Box core contents block */}
               <div className="space-y-1 w-full max-w-full">
                 <div className={`flex items-baseline gap-2 ${isUser ? 'justify-end' : 'justify-start'}`}>
-                  <span className="text-[10px] font-black font-sans text-neutral-800">{m.username}</span>
+                  <span className="text-[10px] font-black font-sans text-neutral-800">
+                    {m.username}
+                    {m.userId === currentHost.id && (
+                      <span className="bg-amber-500 text-white font-mono px-1 pb-0.5 text-[8px] font-black border border-black ml-1.5 shadow-[1px_1px_0px_0px_rgba(0,0,0,1)] select-none">
+                        堂倌/总调度 🤵🏽
+                      </span>
+                    )}
+                  </span>
                   <span className="text-[8px] font-mono text-neutral-400">
                     {new Date(m.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                   </span>
@@ -569,7 +757,11 @@ export default function AgentChat({
                 {/* Mode tabs rendering switcher */}
                 {currentMode === 'text' && (
                   <div className={`p-3 border-2 border-black rounded-none break-words text-xs sm:text-sm font-sans whitespace-pre-wrap leading-relaxed max-w-2xl ${
-                    isUser ? 'bg-amber-100 text-black shadow-[3px_3px_0px_0px_rgba(0,0,0,1)]' : 'bg-white text-black shadow-[3px_3px_0px_0px_rgba(0,0,0,1)]'
+                    isUser
+                      ? 'bg-amber-100 text-black shadow-[3px_3px_0px_0px_rgba(0,0,0,1)]'
+                      : m.userId === currentHost.id
+                      ? 'bg-amber-50/70 border-amber-500 text-black shadow-[3px_3px_0px_0px_rgba(245,158,11,1)]'
+                      : 'bg-white text-black shadow-[3px_3px_0px_0px_rgba(0,0,0,1)]'
                   }`}>
                     {displayText}
                   </div>
@@ -668,6 +860,44 @@ export default function AgentChat({
       {/* Typing & Action bar bottom cluster */}
       <div className="border-t-4 border-black p-3 bg-white shrink-0 space-y-3" id="input_panel_wrapper">
         
+        {/* Dynamic Host Topic Suggestions & Idle Tips */}
+        {suggestions.length > 0 && (
+          <div className="space-y-1.5" id="host_guidance_block">
+            {/* Active Idle Hint Callout */}
+            {isIdle ? (
+              <div className="flex items-center gap-1.5 text-[11px] text-amber-800 font-mono font-bold animate-pulse bg-amber-50 p-2 border border-dashed border-amber-400">
+                <span>{currentHost.avatar}</span>
+                <span>
+                  {teahouseId === 'th_jinli_memory' && `【堂倌二娃过来续茶】: “客官师兄，盖碗茶焖得久咯！二娃推荐您撮个热乎话题唠唠：”`}
+                  {teahouseId === 'th_cyber_silicon' && `【总控主频调度警报】: “检测到指令线中断。操作员，输入端推荐重新激活以下任一核心逻辑：”`}
+                  {teahouseId === 'th_qingcheng_wellness' && `【小师妹托腮温水】: “师兄，手持温茶，闭目片刻。得空了再点点下边的话题，叫先生开讲：”`}
+                </span>
+              </div>
+            ) : (
+              <div className="flex items-center gap-1.5 text-[10px] text-zinc-500 font-mono font-bold">
+                <Sparkles className="w-3 h-3 text-amber-500 animate-spin" />
+                <span>{currentHost.name} 堂前提议新议题 (点击快速调度席上大佬)：</span>
+              </div>
+            )}
+
+            {/* Clickable Card Chips Container */}
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2" id="chip_suggestions_wrapper">
+              {suggestions.map((sug, idx) => (
+                <button
+                  key={idx}
+                  type="button"
+                  disabled={loading}
+                  onClick={() => handleSendMessage(undefined, sug)}
+                  className="flex flex-col justify-between p-2 text-left bg-zinc-50 hover:bg-amber-50/50 border-2 border-black text-[10.5px] leading-snug font-sans text-neutral-800 transition-all cursor-pointer hover:-translate-y-0.5 hover:shadow-[2px_2px_0px_0px_rgba(0,0,0,1)] disabled:opacity-50 disabled:pointer-events-none"
+                >
+                  <span className="font-bold flex-grow pr-1 text-zinc-900">{sug}</span>
+                  <span className="text-[8px] bg-neutral-900 text-white px-1 py-0.2 mt-1.5 font-mono uppercase w-fit rounded-none">点击开杠 ⚡</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
         {/* Quick Roundtable Actions drawer (Add water / Generate outcome summaries) */}
         <div className="flex flex-wrap gap-2 justify-between items-center bg-neutral-50 p-2 border-2 border-dashed border-black" id="action_triggers_bar">
           <button
