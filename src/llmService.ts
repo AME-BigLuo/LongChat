@@ -8,16 +8,16 @@ export interface LLMConfig {
 }
 
 const DEFAULT_CONFIG: LLMConfig = {
-  apiKey: 'sk-83c7e31396c5412fa9140d9517e49b02',
-  baseUrl: 'https://api.deepseek.com/v1',
-  model: 'deepseek-chat'
+  apiKey: '',
+  baseUrl: 'https://api.grsai.com/v1',
+  model: 'gemini-3.1-flash-lite'
 };
 
 // 1. Get configuration
 export function getLLMConfig(): LLMConfig {
-  const defaultKey = 'sk-83c7e31396c5412fa9140d9517e49b02';
-  const defaultBase = 'https://api.deepseek.com/v1';
-  const defaultModel = 'deepseek-chat';
+  const defaultKey = '';
+  const defaultBase = 'https://api.grsai.com/v1';
+  const defaultModel = 'gemini-3.1-flash-lite';
 
   const localKey = localStorage.getItem('longmenzhen_apiKey') || '';
   const localBase = localStorage.getItem('longmenzhen_baseUrl') || '';
@@ -29,31 +29,79 @@ export function getLLMConfig(): LLMConfig {
   const envModel = (import.meta as any).env.VITE_LLM_MODEL || '';
 
   const finalKey = localKey || envKey || defaultKey;
-  let finalBase = localBase || envBase;
-  let finalModel = localModel || envModel;
-
-  // Auto-detect and route between official Gemini and OpenAI/DeepSeek based on key prefixes
-  if (finalKey.startsWith('sk-')) {
-    if (!finalBase) {
-      finalBase = defaultBase;
-    }
-    if (!finalModel || finalModel === 'gemini-3.1-flash-lite') {
-      finalModel = defaultModel;
-    }
-  } else {
-    if (!finalBase) {
-      finalBase = '';
-    }
-    if (!finalModel) {
-      finalModel = 'gemini-3.1-flash-lite';
-    }
-  }
+  let finalBase = localBase !== null && localBase !== undefined ? localBase : (envBase || defaultBase);
+  let finalModel = localModel || envModel || defaultModel;
 
   return {
     apiKey: finalKey,
     baseUrl: finalBase,
     model: finalModel
   };
+}
+
+// 1.5 Fetch available model list from OpenAI-compatible /v1/models endpoint
+export async function fetchAvailableModels(apiKey: string, baseUrl: string): Promise<string[]> {
+  if (!apiKey) return [];
+  
+  const trimmedKey = apiKey.trim();
+  const trimmedBase = baseUrl.trim();
+
+  // If baseUrl is empty, it's official Google Gemini direct
+  if (!trimmedBase) {
+    return [
+      'gemini-3.1-flash-lite',
+      'gemini-2.5-flash',
+      'gemini-1.5-flash',
+      'gemini-1.5-pro'
+    ];
+  }
+
+  // Construct target models endpoint
+  let end = trimmedBase;
+  if (end.endsWith('/v1')) {
+    end += '/models';
+  } else if (end.endsWith('/')) {
+    end += 'models';
+  } else {
+    end += '/v1/models';
+  }
+
+  try {
+    const response = await fetch(end, {
+      method: 'GET',
+      headers: {
+        'Authorization': `Bearer ${trimmedKey}`,
+        'Content-Type': 'application/json'
+      }
+    });
+
+    if (!response.ok) {
+      throw new Error(`API 返回 HTTP 错误 ${response.status}`);
+    }
+
+    const data = await response.json();
+    if (data && Array.isArray(data.data)) {
+      // Return list of model IDs, filtered or sorted
+      const modelCodes = data.data
+        .map((m: any) => typeof m === 'string' ? m : m.id)
+        .filter(Boolean) as string[];
+      
+      // Sort so gemini-3.1-flash-lite is at top if present, otherwise alphabetical
+      modelCodes.sort((a, b) => {
+        if (a.includes('gemini-3.1-flash-lite')) return -1;
+        if (b.includes('gemini-3.1-flash-lite')) return 1;
+        if (a.includes('flash-lite')) return -1;
+        if (b.includes('flash-lite')) return 1;
+        return a.localeCompare(b);
+      });
+
+      return modelCodes;
+    }
+    return [];
+  } catch (err: any) {
+    console.error('Fetch models error:', err);
+    throw new Error(err.message || '网络无法访问目标底座，或者该 Key 无权拉取模型列表');
+  }
 }
 
 // 2. Save configuration
