@@ -8,26 +8,51 @@ export interface LLMConfig {
 }
 
 const DEFAULT_CONFIG: LLMConfig = {
-  apiKey: '',
-  baseUrl: '',
-  model: 'gemini-3.1-flash-lite'
+  apiKey: 'sk-83c7e31396c5412fa9140d9517e49b02',
+  baseUrl: 'https://api.deepseek.com/v1',
+  model: 'deepseek-chat'
 };
 
 // 1. Get configuration
 export function getLLMConfig(): LLMConfig {
+  const defaultKey = 'sk-83c7e31396c5412fa9140d9517e49b02';
+  const defaultBase = 'https://api.deepseek.com/v1';
+  const defaultModel = 'deepseek-chat';
+
   const localKey = localStorage.getItem('longmenzhen_apiKey') || '';
   const localBase = localStorage.getItem('longmenzhen_baseUrl') || '';
-  const localModel = localStorage.getItem('longmenzhen_model') || 'gemini-3.1-flash-lite';
+  const localModel = localStorage.getItem('longmenzhen_model') || '';
 
   // Fallbacks to package build variables if any
   const envKey = (import.meta as any).env.VITE_GEMINI_API_KEY || (import.meta as any).env.VITE_API_KEY || '';
   const envBase = (import.meta as any).env.VITE_GEMINI_BASE_URL || '';
   const envModel = (import.meta as any).env.VITE_LLM_MODEL || '';
 
+  const finalKey = localKey || envKey || defaultKey;
+  let finalBase = localBase || envBase;
+  let finalModel = localModel || envModel;
+
+  // Auto-detect and route between official Gemini and OpenAI/DeepSeek based on key prefixes
+  if (finalKey.startsWith('sk-')) {
+    if (!finalBase) {
+      finalBase = defaultBase;
+    }
+    if (!finalModel || finalModel === 'gemini-3.1-flash-lite') {
+      finalModel = defaultModel;
+    }
+  } else {
+    if (!finalBase) {
+      finalBase = '';
+    }
+    if (!finalModel) {
+      finalModel = 'gemini-3.1-flash-lite';
+    }
+  }
+
   return {
-    apiKey: localKey || envKey || '',
-    baseUrl: localBase || envBase || '',
-    model: localModel || envModel || 'gemini-3.1-flash-lite'
+    apiKey: finalKey,
+    baseUrl: finalBase,
+    model: finalModel
   };
 }
 

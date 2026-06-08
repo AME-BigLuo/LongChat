@@ -178,21 +178,48 @@ export default function SettingsModal({ onClose, onConfigSaved }: SettingsModalP
           )}
 
           {/* Submit */}
-          <div className="flex justify-end gap-2 pt-2 border-t-2 border-black" id="settings_actions_box">
+          <div className="flex flex-wrap justify-between items-center gap-2 pt-2 border-t-2 border-black" id="settings_actions_box">
             <button
               type="button"
-              onClick={onClose}
-              className="border-2 border-black px-4 py-2 text-xs font-mono font-extrabold hover:bg-neutral-100 cursor-pointer"
+              onClick={() => {
+                setApiKey('sk-83c7e31396c5412fa9140d9517e49b02');
+                setBaseUrl('https://api.deepseek.com/v1');
+                setModel('deepseek-chat');
+                saveLLMConfig({
+                  apiKey: 'sk-83c7e31396c5412fa9140d9517e49b02',
+                  baseUrl: 'https://api.deepseek.com/v1',
+                  model: 'deepseek-chat'
+                });
+                setSaveSuccess(true);
+                onConfigSaved();
+                setTimeout(() => {
+                  setSaveSuccess(false);
+                  onClose();
+                }, 1200);
+              }}
+              className="border-2 border-dashed border-red-500 text-red-600 hover:bg-red-50 px-3 py-1.5 text-xs font-mono font-extrabold transition-all cursor-pointer"
+              id="btn_reset_to_preconfigured"
+              title="一键加载后台预设的独立 DeepSeek 密钥和接口底座"
             >
-              取消
+              ⚡ 一键加载后备 DeepSeek
             </button>
-            <button
-              type="submit"
-              className="border-2 border-black bg-black text-white hover:bg-white hover:text-black px-4 py-2 text-xs font-mono font-extrabold transition-all cursor-pointer"
-              id="btn_save_settings_submit"
-            >
-              保存参数 ⚙
-            </button>
+
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={onClose}
+                className="border-2 border-black px-4 py-2 text-xs font-mono font-extrabold hover:bg-neutral-100 cursor-pointer"
+              >
+                取消
+              </button>
+              <button
+                type="submit"
+                className="border-2 border-black bg-black text-white hover:bg-white hover:text-black px-4 py-2 text-xs font-mono font-extrabold transition-all cursor-pointer"
+                id="btn_save_settings_submit"
+              >
+                保存参数 ⚙
+              </button>
+            </div>
           </div>
         </form>
       </div>
