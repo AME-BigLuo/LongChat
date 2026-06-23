@@ -1,26 +1,28 @@
 import React from 'react';
 import { PRESET_TEAHOUSES, Teahouse } from '../data/teahouseData';
 import { Coffee, ChevronRight, MessageSquare, Sparkles } from 'lucide-react';
+import { AppLanguage } from '../types';
 
 interface TeahouseListProps {
   activeId: string;
   onSelect: (id: string) => void;
   customActiveCounts: Record<string, number>;
+  language: AppLanguage;
 }
 
-export default function TeahouseList({ activeId, onSelect, customActiveCounts }: TeahouseListProps) {
+export default function TeahouseList({ activeId, onSelect, customActiveCounts, language }: TeahouseListProps) {
   return (
     <div className="border-4 border-black p-4 bg-white shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] space-y-3" id="teahouse_directory_card">
       <h3 className="text-xs font-mono font-black uppercase tracking-wider flex items-center justify-between border-b-2 border-black pb-1.5 text-black">
         <span className="flex items-center gap-1">
           <Coffee className="w-3.5 h-3.5 text-black" />
-          <span>2. 移步挑选雅致茶轩 (Teahouses)</span>
+          <span>{language === 'zh' ? '2. 选择茶馆' : '2. Choose a teahouse'}</span>
         </span>
-        <span className="text-[9px] border border-black bg-amber-100 px-1">纯享3馆</span>
+        <span className="text-[9px] border border-black bg-amber-100 px-1">{language === 'zh' ? '3 个茶馆' : '3 rooms'}</span>
       </h3>
       
       <p className="text-[11px] text-neutral-500 font-sans leading-tight">
-        客官，大堂嘈杂，移步下面不同的清修雅间，每间茶轩均入住专属不同维度的 AI 阵友群。
+        {language === 'zh' ? '选择一个最适合当前话题的茶馆。' : 'Pick the room that matches the discussion you want to have.'}
       </p>
 
       <div className="grid grid-cols-1 gap-2.5 pt-1.5" id="teahouses_selector_grid">
@@ -47,7 +49,7 @@ export default function TeahouseList({ activeId, onSelect, customActiveCounts }:
                 <div className="flex items-center gap-1.5 flex-wrap">
                   <span className="font-black text-xs block truncate">{th.name}</span>
                   <span className="text-[8px] font-mono border border-black bg-white px-1 leading-none scale-90">
-                    {activeCount}茶友
+                    {language === 'zh' ? `${activeCount}茶友` : `${activeCount} guests`}
                   </span>
                 </div>
                 <p className="text-[10px] text-neutral-600 mt-1 leading-snug line-clamp-2">

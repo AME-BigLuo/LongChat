@@ -10,4 +10,22 @@
   .border-brutal {
     border: 3px solid #000000;
   }
+
+  .app_scale_shell {
+    zoom: var(--ui-scale, 1);
+    width: 100%;
+    min-height: 100vh;
+    margin-inline: auto;
+  }
+
+  .modal_scale_shell {
+    zoom: var(--ui-scale, 1);
+    width: min(48rem, calc((100vw - 1rem) / var(--ui-scale, 1)));
+    max-height: calc((100vh - 1rem) / var(--ui-scale, 1));
+  }
+
+  .dialog_scroll_area {
+    max-height: min(82vh, 900px);
+    overflow: auto;
+  }
 }

@@ -1,10 +1,11 @@
 import React, { useState, useEffect } from 'react';
-import { AgentTemplate } from '../types';
+import { AgentTemplate, AppLanguage } from '../types';
 import { 
   Sparkles, PlusCircle, Trash2, Loader2, Info, CheckSquare, Square, 
   HelpCircle, MessageSquare, Coffee, Flame, HeartHandshake, EyeOff, Eye 
 } from 'lucide-react';
 import { generateClientCustomPrompt, getLLMConfig } from '../llmService';
+import { STORAGE_KEYS } from '../constants';
 
 interface AgentSeatsProps {
   teahouseId: string;
@@ -16,6 +17,7 @@ interface AgentSeatsProps {
   onDirectPoke: (agentId: string) => void;
   onOpenSettings: () => void;
   onCustomAgentsUpdated: () => void;
+  language: AppLanguage;
 }
 
 export default function AgentSeats({
@@ -27,7 +29,8 @@ export default function AgentSeats({
   onDirectPrompt,
   onDirectPoke,
   onOpenSettings,
-  onCustomAgentsUpdated
+  onCustomAgentsUpdated,
+  language
 }: AgentSeatsProps) {
   // Custom agents specifically for this teahouse
   const [customAgents, setCustomAgents] = useState<AgentTemplate[]>([]);
@@ -48,7 +51,7 @@ export default function AgentSeats({
   }, [teahouseId]);
 
   const loadLocalCustomAgents = () => {
-    const key = `longmenzhen_custom_agents_v2_${teahouseId}`;
+    const key = STORAGE_KEYS.customAgents(teahouseId);
     const stored = localStorage.getItem(key);
     if (stored) {
       try {
@@ -63,7 +66,7 @@ export default function AgentSeats({
 
   const saveCustomAgentsToLocal = (agents: AgentTemplate[]) => {
     setCustomAgents(agents);
-    const key = `longmenzhen_custom_agents_v2_${teahouseId}`;
+    const key = STORAGE_KEYS.customAgents(teahouseId);
     localStorage.setItem(key, JSON.stringify(agents));
     onCustomAgentsUpdated();
   };
@@ -71,13 +74,13 @@ export default function AgentSeats({
   const handleForgeAgent = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!formName.trim() || !formDesc.trim() || !formStyle.trim() || !formOutcome.trim()) {
-      setFormError('所有大项均需填妥，以便神妙熔炉进行熔炼！');
+      setFormError(language === 'zh' ? '请完整填写所有字段。' : 'Please fill in every field.');
       return;
     }
 
     const config = getLLMConfig();
     if (!config.apiKey) {
-      setFormError('未在中转/官方平台检测到 API Key，请点击右上角【⚙ 适配参数配置】。');
+      setFormError(language === 'zh' ? '请先配置 API Key。' : 'Please configure an API key first.');
       onOpenSettings();
       return;
     }
@@ -114,10 +117,10 @@ export default function AgentSeats({
 
       // Reset form variables
       setShowForgeForm(false);
-      setFormName('龙门馆新掌门');
-      setFormDesc('擅长分析...');
+      setFormName('New Teahouse Guest');
+      setFormDesc('Strong at analysis and structured thinking.');
     } catch (err: any) {
-      setFormError(err.message || '大炉融金失败，请确认您的密钥、中转端点连通率。');
+      setFormError(err.message || (language === 'zh' ? '创建新茶友失败。' : 'Unable to forge a new guest.'));
     } finally {
       setForging(false);
     }
@@ -125,7 +128,7 @@ export default function AgentSeats({
 
   const handleDeleteAgent = (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
-    if (confirm('客官三思！是否确定拆除该 AI 茶客席位？拆除后将一去不返。')) {
+    if (confirm(language === 'zh' ? '确定删除这个自定义茶友吗？此操作不可撤销。' : 'Remove this custom guest? This cannot be undone.')) {
       const remaining = customAgents.filter(a => a.id !== id);
       saveCustomAgentsToLocal(remaining);
     }
@@ -141,7 +144,7 @@ export default function AgentSeats({
       <div className="border-b-2 border-black pb-2.5 flex justify-between items-center" id="seats_section_header">
         <h3 className="text-xs font-black uppercase tracking-wider font-mono flex items-center gap-1.5 text-black">
           <span className="w-2.5 h-2.5 bg-black inline-block animate-pulse"></span>
-          <span>3. 茶轩围炉席位 ({allAgents.length}位老客)</span>
+          <span>{language === 'zh' ? `3. 茶友席位（${allAgents.length}位）` : `3. Guest seats (${allAgents.length})`}</span>
         </h3>
         
         <button
@@ -151,7 +154,7 @@ export default function AgentSeats({
           }`}
           id="btn_toggle_guest_forge"
         >
-          {showForgeForm ? '返回茶席 ✕' : '✨ 淬炼新茶客'}
+          {showForgeForm ? (language === 'zh' ? '返回' : 'Back') : (language === 'zh' ? '✨ 新茶友' : '✨ New guest')}
         </button>
       </div>
 
@@ -159,16 +162,18 @@ export default function AgentSeats({
         /* Forge Form Block */
         <form onSubmit={handleForgeAgent} className="border-2 border-black p-3 space-y-3 bg-neutral-50 animate-fade-in" id="guest_forge_form">
           <div className="bg-black text-white px-2 py-0.5 text-[9px] font-black uppercase tracking-widest font-mono">
-            ✨ 神铁熔炉 · 定制特邀 AI 席位
+            {language === 'zh' ? '✨ 自定义 AI 茶友' : '✨ Custom guest forge'}
           </div>
           
           <div className="text-[10px] text-neutral-500 font-sans leading-tight">
-            设定性格，我们将请 Gemini 底座反向写出完美的系统设定词，并直接注入进入当前雅间<strong>『{teahouseName}』</strong>中进行同桌对话摆阵。
+            {language === 'zh'
+              ? <>设定茶友性格，模型会为当前茶馆 <strong>（{teahouseName}）</strong> 生成对应的系统提示词。</>
+              : <>Define the guest, and the model will help draft a system prompt for the current room <strong>({teahouseName})</strong>.</>}
           </div>
 
           <div className="space-y-2.5 text-xs text-black">
             <div>
-              <label className="block font-bold mb-0.5">1. 客人名号 (Name)</label>
+              <label className="block font-bold mb-0.5">{language === 'zh' ? '1. 茶友名号' : '1. Guest name'}</label>
               <input
                 type="text"
                 value={formName}
@@ -179,37 +184,37 @@ export default function AgentSeats({
             </div>
 
             <div>
-              <label className="block font-bold mb-0.5">2. 资历背景及擅长 (Context)</label>
+              <label className="block font-bold mb-0.5">{language === 'zh' ? '2. 背景与擅长' : '2. Background and strengths'}</label>
               <textarea
                 rows={2}
                 value={formDesc}
                 onChange={(e) => setFormDesc(e.target.value)}
                 className="w-full bg-white border border-black p-1.5 text-[11px] focus:outline-none"
-                placeholder="擅长出奇招、深谙系统容错..."
+                placeholder={language === 'zh' ? '例如：擅长分析、检索和落地交付...' : 'Strong at analysis, retrieval, and delivery...'}
                 required
               />
             </div>
 
             <div>
-              <label className="block font-bold mb-0.5">3. 聊天风格 (Style)</label>
+              <label className="block font-bold mb-0.5">{language === 'zh' ? '3. 说话风格' : '3. Speaking style'}</label>
               <input
                 type="text"
                 value={formStyle}
                 onChange={(e) => setFormStyle(e.target.value)}
                 className="w-full bg-white border border-black px-2 py-1 focus:outline-none"
-                placeholder="例如: 冷峻傲娇、热衷打趣、爱甩古诗句..."
+                placeholder={language === 'zh' ? '例如：简洁、幽默、技术感强...' : 'e.g. concise, playful, technical...'}
                 required
               />
             </div>
 
             <div>
-              <label className="block font-bold mb-0.5">4. 期望产出 (Goal)</label>
+              <label className="block font-bold mb-0.5">{language === 'zh' ? '4. 期望产出' : '4. Expected outcome'}</label>
               <input
                 type="text"
                 value={formOutcome}
                 onChange={(e) => setFormOutcome(e.target.value)}
                 className="w-full bg-white border border-black px-2 py-1 focus:outline-none"
-                placeholder="例如: 制定一套全栈部署命令清单"
+                placeholder={language === 'zh' ? '例如：一份可执行落地方案' : 'e.g. a practical rollout plan'}
                 required
               />
             </div>
@@ -227,7 +232,7 @@ export default function AgentSeats({
               onClick={() => setShowForgeForm(false)}
               className="px-2 py-1 border border-black bg-white hover:bg-neutral-100 text-[10px] cursor-pointer"
             >
-              取消
+              {language === 'zh' ? '取消' : 'Cancel'}
             </button>
             <button
               type="submit"
@@ -237,12 +242,12 @@ export default function AgentSeats({
               {forging ? (
                 <>
                   <Loader2 className="w-3 h-3 animate-spin" />
-                  <span>神工铸魂中...</span>
+                  <span>{language === 'zh' ? '生成中...' : 'Forging...'}</span>
                 </>
               ) : (
                 <>
                   <Sparkles className="w-3 h-3 text-yellow-300" />
-                  <span>精炼出关 ⚙</span>
+                  <span>{language === 'zh' ? '生成茶友 ⚙' : 'Forge guest ⚙'}</span>
                 </>
               )}
             </button>
@@ -275,7 +280,7 @@ export default function AgentSeats({
                       <span className="font-extrabold text-xs tracking-tight truncate">{ag.name}</span>
                       {ag.isCustom && (
                         <span className="text-[8px] bg-amber-100 text-amber-900 px-1 border border-amber-300 scale-90 block">
-                          定制
+                          {language === 'zh' ? '自定义' : 'Custom'}
                         </span>
                       )}
                     </div>
@@ -293,15 +298,15 @@ export default function AgentSeats({
                         ? 'border-emerald-600 bg-emerald-50 text-emerald-800' 
                         : 'border-neutral-300 bg-white text-neutral-400'
                     }`}
-                    title={isChecked ? "使此茶客退席，不再参与多人大合唱" : "请此茶客入席，共同参与多人对话辩论"}
+                    title={isChecked ? (language === 'zh' ? '让该茶友离席' : 'Remove this guest from the room') : (language === 'zh' ? '请该茶友入席' : 'Add this guest to the room')}
                   >
-                    <span>{isChecked ? '🟢 席上' : '🔘 空席'}</span>
+                    <span>{isChecked ? (language === 'zh' ? '在席' : 'On') : (language === 'zh' ? '离席' : 'Off')}</span>
                   </button>
                 </div>
 
                 {/* Sub-style line */}
                 <div className="text-[9px] text-amber-800 bg-amber-50/50 border border-dotted border-amber-300 px-1.5 py-0.5 mt-2 font-mono">
-                  调性: {ag.style.slice(0, 40)}...
+                  {language === 'zh' ? '风格' : 'Style'}: {ag.style.slice(0, 40)}...
                 </div>
 
                 {/* Direct Command Buttons Under Row */}
@@ -310,17 +315,17 @@ export default function AgentSeats({
                     type="button"
                     onClick={() => onDirectPrompt(ag.id)}
                     className="py-1 px-1 border border-black bg-white hover:bg-neutral-100 text-center font-bold relative cursor-pointer active:top-0.5"
-                    title={`单独向 ${ag.name} 提个尖锐问题`}
+                    title={language === 'zh' ? `单独向 ${ag.name} 提问` : `Ask ${ag.name} directly`}
                   >
-                    💬 指名提问 TA
+                    💬 {language === 'zh' ? '指名提问' : 'Direct ask'}
                   </button>
                   <button
                     type="button"
                     onClick={() => onDirectPoke(ag.id)}
                     className="py-1 px-1 border border-black bg-neutral-900 text-white hover:bg-black text-center font-bold relative cursor-pointer active:top-0.5"
-                    title={`催促 ${ag.name} 根据全桌前文内容说几句短评插个嘴`}
+                    title={language === 'zh' ? `请 ${ag.name} 先插话` : `Poke ${ag.name} to speak first`}
                   >
-                    🍵 请 TA 插嘴
+                    🍵 {language === 'zh' ? '请他插话' : 'Poke'}
                   </button>
                 </div>
 
@@ -330,7 +335,7 @@ export default function AgentSeats({
                     type="button"
                     onClick={(e) => handleDeleteAgent(ag.id, e)}
                     className="absolute right-0 bottom-11 p-1 text-neutral-400 hover:text-red-600 cursor-pointer"
-                    title="拆毁此茶席设定"
+                    title={language === 'zh' ? '删除这个自定义茶友' : 'Remove this custom guest'}
                   >
                     <Trash2 className="w-3 h-3" />
                   </button>

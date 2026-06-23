@@ -1,6 +1,6 @@
 {
-  "name": "龙门阵",
-  "description": "极简主义、高隐私的实时AI聊天室。支持管理者配置AI主持角色，实时语音通话与多方讨论，对话结束后自动向所有参与者分发深度讨论总结并自动销毁房间全部聊天记录，保障隐私安全。",
+  "name": "碳硅茶馆",
+  "description": "An open-source multi-agent teahouse for AI, Agent, and enterprise AI discussions, with configurable LLM settings and privacy-minded local state.",
   "requestFramePermissions": [
     "microphone"
   ],

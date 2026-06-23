@@ -1,11 +1,12 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { 
-  Send, Trash2, Flame, Wine, FileText, CheckCircle2, Copy, Download, 
-  Sparkles, Loader2, RefreshCw, Eye, Code, Play, ExternalLink, Laptop, Globe, Users, HelpCircle 
+import {
+  Send, Trash2, Flame, Wine, FileText, Copy, Download,
+  Sparkles, Loader2, Users
 } from 'lucide-react';
-import { AgentTemplate, Message } from '../types';
+import { AgentTemplate, Message, AppLanguage } from '../types';
 import { generateClientLLMResponse, generateClientSummaryHtml } from '../llmService';
 import { PRESET_TEAHOUSES } from '../data/teahouseData';
+import { STORAGE_KEYS } from '../constants';
 
 interface AgentChatProps {
   teahouseId: string;
@@ -18,6 +19,7 @@ interface AgentChatProps {
   // External reactive action triggers passed by sidebar quick items
   triggerAction: { agentId: string; action: 'direct' | 'poke'; timestamp: number } | null;
   onClearTrigger: () => void;
+  language: AppLanguage;
 }
 
 export default function AgentChat({
@@ -29,7 +31,8 @@ export default function AgentChat({
   userNickname,
   onOpenSettings,
   triggerAction,
-  onClearTrigger
+  onClearTrigger,
+  language
 }: AgentChatProps) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [inputValue, setInputValue] = useState('');
@@ -44,7 +47,7 @@ export default function AgentChat({
 
   useEffect(() => {
     const updateStats = () => {
-      const stored = parseInt(localStorage.getItem('longmenzhen_total_chars_saved') || '0', 10);
+      const stored = parseInt(localStorage.getItem(STORAGE_KEYS.totalCharsSaved) || '0', 10);
       setTotalSavedChars(stored);
     };
     updateStats();
@@ -56,11 +59,11 @@ export default function AgentChat({
   const activeTeahouse = PRESET_TEAHOUSES.find(t => t.id === teahouseId);
   const currentHost = activeTeahouse?.host || {
     id: 'host_fallback',
-    name: '茶馆馆长',
+    name: 'Teahouse Host',
     avatar: '🤵',
-    role: '司茶 / 雅间调度人',
-    description: '茶馆掌门人，热心协调、倒茶调度并引导聊天话题。',
-    systemPrompt: '你是一位热心的茶铺掌门，调度各位席上茶友。'
+    role: 'Host / room dispatcher',
+    description: 'A neutral room host that keeps the discussion moving.',
+    systemPrompt: 'You are a helpful room host who routes the conversation and keeps the pace balanced.'
   };
 
   // Guided Topics State
@@ -78,7 +81,8 @@ export default function AgentChat({
   
   // Track visual active tab ('text' | 'sandbox' | 'source') per chat message for HTML rendering
   const [messageViewModes, setMessageViewModes] = useState<Record<string, 'text' | 'sandbox' | 'source'>>({});
-  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const messagesScrollerRef = useRef<HTMLDivElement>(null);
+  const isZh = language === 'zh';
 
   const initializeWelcomeMessage = (): Message[] => {
     return [
@@ -87,8 +91,10 @@ export default function AgentChat({
         roomId: teahouseId,
         role: 'system',
         userId: 'system_p',
-        username: '茶馆小二',
-        text: `【${teahouseName}】堂口起锅开气，长嘴青铜壶在白沸水中盘旋点花。${teahouseIntro}\n\n💡 席上已为您备好数位各有绝活的茶友，勾选激活他们并提问，即可开始精彩漫漫。`,
+        username: isZh ? '茶馆小二' : 'Teahouse System',
+        text: isZh
+          ? `【${teahouseName}】已经开席。${teahouseIntro}\n\n席上已备好多位 AI 茶友，勾选想让他们参与的人，然后直接提问即可。`
+          : `[${teahouseName}] is open. ${teahouseIntro}\n\nSeveral AI guests are ready. Select who should join and start the discussion.`,
         timestamp: Date.now()
       }
     ];
@@ -96,7 +102,7 @@ export default function AgentChat({
 
   const saveHistory = (newMsgs: Message[]) => {
     setMessages(newMsgs);
-    const historyKey = `longmenzhen_chamber_history_v2_${teahouseId}`;
+    const historyKey = STORAGE_KEYS.history(teahouseId);
     localStorage.setItem(historyKey, JSON.stringify(newMsgs));
   };
 
@@ -110,27 +116,10 @@ export default function AgentChat({
     setIsIdle(false);
     
     // Set Default suggestions immediately based on the room
-    if (teahouseId === 'th_jinli_memory') {
-      setSuggestions([
-        '请说书老秀才摆一摆成都街巷的奇闻趣事，清清脑壳 👴🏽',
-        '请辣掌柜算一算，我这不温不火的性子如何生财破局 👩🏻‍🍳',
-        '听隐世军师解一解，道家如何借太极“无为”卸掉当下的苦闷 🧘‍♂️'
-      ]);
-    } else if (teahouseId === 'th_cyber_silicon') {
-      setSuggestions([
-        '叫赛博极客代码侠给我现场搓一个好玩的可视化交互网页原型 🧙‍♂️',
-        '呼唤红杉创投硬核心帮我算一算这个方向的付费转化率与生命周期价值 👩🏻‍💼',
-        '听智脑分析姬梳理整个业务流和并发瓶颈，找技术死穴 🦾'
-      ]);
-    } else {
-      setSuggestions([
-        '叫太极道长现场展示肩颈舒展与一分钟太极安神打坐法 📿',
-        '请识药小药童为我调配一剂防熬夜脱发和护肝明目的盖碗茶方 🌿',
-        '请梅花易占师起一个易数吉凶卦，推演当前焦虑行止的周流之变 🌌'
-      ]);
-    }
+    const currentTeahouse = PRESET_TEAHOUSES.find(t => t.id === teahouseId);
+    setSuggestions(currentTeahouse?.suggestions || []);
 
-    const historyKey = `longmenzhen_chamber_history_v2_${teahouseId}`;
+    const historyKey = STORAGE_KEYS.history(teahouseId);
     const stored = localStorage.getItem(historyKey);
     if (stored) {
       try {
@@ -167,7 +156,7 @@ export default function AgentChat({
     if (triggerAction.action === 'direct') {
       // Focus user's prompt row exclusively on this agent
       setDesignatedAgentId(targetAg.id);
-      setInputValue(`请问【${targetAg.name}】：针对... `);
+      setInputValue(isZh ? `请问【${targetAg.name}】：针对... ` : `Question for ${targetAg.name}: about... `);
       // Clean trigger queue
       onClearTrigger();
     } else if (triggerAction.action === 'poke') {
@@ -179,7 +168,10 @@ export default function AgentChat({
 
   // Scroll to bottom
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    const scroller = messagesScrollerRef.current;
+    if (scroller) {
+      scroller.scrollTo({ top: scroller.scrollHeight, behavior: 'smooth' });
+    }
   }, [messages, thinkingAgent]);
 
   // Handle direct prompt submitting or trigger-based input
@@ -199,7 +191,7 @@ export default function AgentChat({
     setLastInteractionTime(Date.now());
     setIsIdle(false);
 
-    const currentNick = userNickname || '阵主客官';
+    const currentNick = userNickname || (isZh ? '客官' : 'Guest');
 
     const userMsg: Message = {
       id: 'msg_u_' + Date.now().toString(36),
@@ -247,7 +239,7 @@ export default function AgentChat({
         const speakingAgents = allAgents.filter(a => activeAgentIds.includes(a.id));
         
         // Define Host thinking visual while determining routing
-        setThinkingAgent(`${currentHost.name} (司茶调度中...)`);
+        setThinkingAgent(isZh ? `${currentHost.name}（调度中...）` : `${currentHost.name} (dispatching...)`);
 
         // Format history context for Host
         const hostHistoryContext = updatedHistory
@@ -430,7 +422,7 @@ ${speakingAgentsLabel}
       }
     } catch (err: any) {
       console.error(err);
-      setErrorMsg(err.message || '大模型对话受到阻塞，请检查您的 API 密钥及连接端点连通性。');
+      setErrorMsg(err.message || (isZh ? '大模型对话受阻，请检查 API Key 和 BaseURL。' : 'LLM response failed. Check your API Key and BaseURL.'));
     } finally {
       setLoading(false);
       setThinkingAgent(null);
@@ -505,14 +497,14 @@ ${speakingAgentsLabel}
         roomId: teahouseId,
         role: 'system',
         userId: 'system_p',
-        username: '茶馆小二',
-        text: `【茶博士浇注泉眼】请『${agent.name}』入局插话。`,
+        username: isZh ? '茶馆小二' : 'Teahouse System',
+        text: isZh ? `【茶馆小二】请『${agent.name}』入局插话。` : `Teahouse system asked ${agent.name} to join the discussion.`,
         timestamp: Date.now() - 5
       };
 
       saveHistory([...messages, sysNotice, agMsg]);
     } catch (err: any) {
-      setErrorMsg(`插嘴点评失败: ${err.message || '请前往右上角配置密钥。'}`);
+      setErrorMsg(isZh ? `插话失败：${err.message || '请先配置 API Key、BaseURL、ENDPOINT_PATH 和 Model。'}` : `Chime-in failed: ${err.message || 'Please configure API Key, BaseURL, ENDPOINT_PATH, and Model first.'}`);
     } finally {
       setLoading(false);
       setThinkingAgent(null);
@@ -529,7 +521,7 @@ ${speakingAgentsLabel}
   };
 
   const handleClearChat = () => {
-    if (confirm('确认砸烂茶盅退桌吗？这将立刻粉碎清空当前茶轩的全部聊天痕迹（阅后即销、不留备份）。')) {
+    if (confirm(isZh ? '确定清空当前茶馆的全部聊天记录吗？此操作不可撤销。' : 'Clear all chat history in this teahouse? This cannot be undone.')) {
       const init = initializeWelcomeMessage();
       saveHistory(init);
       setSummaryHtml(null);
@@ -541,12 +533,12 @@ ${speakingAgentsLabel}
   // Compile full outcome HTML and open download using the consolidated multi-agent logs
   const handleGenerateReport = async () => {
     if (messages.length < 3) {
-      alert('茶还没泡开，消息寥寥几句，大伙多唠唠几句后再结案大总结吧！');
+      alert(isZh ? '当前消息太少，请多聊几句后再生成总结。' : 'There are too few messages to summarize. Continue the discussion first.');
       return;
     }
 
     setSummarizing(true);
-    setSummaryStatusMessage('正在煮茶温酒、研磨宣纸墨汁，为您起草全雅间多茶友辩论总结...');
+    setSummaryStatusMessage(isZh ? '正在整理当前茶馆的多角色讨论总结...' : 'Preparing a multi-agent discussion summary...');
     setErrorMsg('');
 
     try {
@@ -557,15 +549,15 @@ ${speakingAgentsLabel}
 
       const outcomeHtml = await generateClientSummaryHtml({
         agentName: teahouseName,
-        topicName: `在『${teahouseName}』下的多客官联合辩论`,
+        topicName: isZh ? `在『${teahouseName}』下的多角色讨论` : `Multi-agent discussion in ${teahouseName}`,
         historyText: conversationText,
         outcomeTarget: allAgents.map(a => `${a.name}: ${a.expectedOutcome}`).join('; ')
       });
 
       setSummaryHtml(outcomeHtml);
-      setSummaryStatusMessage('✓ 总结结案折子已雕版磨好！客官可在下方任意查看、复制源码，或直接下载在本地打开。');
+      setSummaryStatusMessage(isZh ? '✓ 总结已生成。你可以复制 HTML 代码，或下载到本地打开。' : '✓ Summary generated. You can copy the HTML source or download it locally.');
     } catch (err: any) {
-      setErrorMsg(`结案提炼失败: ${err.message}`);
+      setErrorMsg(isZh ? `总结生成失败：${err.message}` : `Summary generation failed: ${err.message}`);
       setSummaryStatusMessage('');
     } finally {
       setSummarizing(false);
@@ -574,32 +566,32 @@ ${speakingAgentsLabel}
 
   const copyToClipboard = (text: string) => {
     navigator.clipboard.writeText(text);
-    alert('极简 HTML 总结源码已成功写入剪切板！');
+    alert(isZh ? 'HTML 总结代码已复制到剪贴板。' : 'Summary HTML copied to clipboard.');
   };
 
   return (
-    <div className="flex flex-col flex-grow bg-white border-4 border-black min-h-[550px] text-black shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] w-full" id="chat_box_wrapper">
+    <div className="flex flex-col bg-white border-4 border-black h-[680px] lg:h-[720px] min-h-0 text-black shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] w-full" id="chat_box_wrapper">
       
       {/* Active Teahouse Dashboard Header */}
-      <div className="border-b-4 border-black p-4 bg-amber-50/20 flex flex-col md:flex-row justify-between items-start md:items-center gap-4 shrink-0" id="chat_dashboard_header">
-        <div className="flex items-center gap-3">
-          <span className="text-3xl bg-amber-100 border-2 border-black p-1.5 shrink-0 block">🧭</span>
+      <div className="border-b-4 border-black p-3 bg-amber-50/20 flex flex-col md:flex-row justify-between items-start md:items-center gap-3 shrink-0" id="chat_dashboard_header">
+        <div className="flex items-center gap-2.5">
+          <span className="text-2xl bg-amber-100 border-2 border-black p-1.5 shrink-0 block">🧭</span>
           <div>
             <div className="flex flex-wrap items-center gap-2">
               <h3 className="font-black text-base">{teahouseName}</h3>
               <div className="flex items-center gap-1.5 bg-neutral-900 text-white px-2 py-0.5 text-[9px] font-mono font-bold border border-black">
                 <Users className="w-2.5 h-2.5" />
-                <span>围炉群聊空间</span>
+                <span>{isZh ? '讨论茶馆' : 'Discussion room'}</span>
               </div>
               {currentHost && (
                 <div className="flex items-center gap-1.5 bg-amber-500 text-black px-2 py-0.5 text-[9px] font-mono font-bold border border-black shadow-[1px_1px_0px_rgba(0,0,0,1)]">
                    <span className="animate-pulse">{currentHost.avatar}</span>
-                  <span>调度总控：{currentHost.name}</span>
+                  <span>{isZh ? '主持调度：' : 'Host: '}{currentHost.name}</span>
                 </div>
               )}
             </div>
             <p className="text-[11px] text-neutral-600 mt-1 leading-snug font-sans">
-              <span className="font-extrabold text-black">雅间调性：</span>{teahouseIntro}
+              <span className="font-extrabold text-black">{isZh ? '茶馆主题：' : 'Room theme: '}</span>{teahouseIntro}
             </p>
           </div>
         </div>
@@ -612,10 +604,10 @@ ${speakingAgentsLabel}
             className={`flex items-center gap-1.5 border-2 border-black px-2.5 py-1 text-[10px] font-mono font-bold transition-all cursor-pointer ${
               totalSavedChars > 0 ? 'bg-emerald-50 text-emerald-950 shadow-[1px_1px_0px_rgba(0,0,0,1)]' : 'bg-teal-50/50 text-teal-800'
             }`}
-            title="点此配置智能 Token 压缩与滑动历史轮数，拯救您的 Token 钱包！"
+            title={isZh ? '配置 Token 压缩与历史轮数。' : 'Configure token compression and history window.'}
           >
             <span className={`w-2.5 h-2.5 rounded-full ${totalSavedChars > 0 ? 'bg-emerald-500 animate-pulse' : 'bg-teal-400'} shrink-0`} />
-            <span className="font-extrabold">🔋 {totalSavedChars > 0 ? `已省 ${totalSavedChars} 字符 (~${(totalSavedChars * 0.95).toFixed(0)} Token)` : '智能省电: 已就绪'}</span>
+            <span className="font-extrabold">🔋 {totalSavedChars > 0 ? (isZh ? `已节省 ${totalSavedChars} 字符（约 ${(totalSavedChars * 0.95).toFixed(0)} Token）` : `Saved ${totalSavedChars} chars (~${(totalSavedChars * 0.95).toFixed(0)} tokens)`) : (isZh ? '上下文压缩：就绪' : 'Context compression ready')}</span>
           </button>
 
           {/* Automatically Roundtable toggler */}
@@ -624,9 +616,9 @@ ${speakingAgentsLabel}
             className={`flex items-center gap-1.5 border-2 border-black px-2.5 py-1 text-[10px] font-mono font-bold transition-all cursor-pointer ${
               autoRoundtable ? 'bg-amber-100 text-black shadow-[1px_1px_0px_rgba(0,0,0,1)]' : 'bg-white text-zinc-500'
             }`}
-            title="自由围炉：用户开腔后，桌上所有活跃茶友将按序一人接一句连环发表见解；关闭后仅首位发言"
+            title={isZh ? '开启后，主持会调度多位在席茶友依次发言；关闭后仅调度一位。' : 'When enabled, the host may route the prompt to multiple active guests; otherwise only one guest responds.'}
           >
-            <span>{autoRoundtable ? '👥 自动围炉: 开启 (连环大唱)' : '👤 单独答复: 开启'}</span>
+            <span>{autoRoundtable ? (isZh ? '👥 多人讨论：开启' : '👥 Roundtable on') : (isZh ? '👤 单人答复：开启' : '👤 Single reply on')}</span>
           </button>
 
           {/* Spicy toggle */}
@@ -636,10 +628,10 @@ ${speakingAgentsLabel}
               spicyMode ? 'bg-red-500 text-white shadow-sm' : 'bg-white text-black hover:bg-neutral-50'
             }`}
             id="btn_toggle_spicy"
-            title="加辣模式：点燃川渝人毒舌好辩本色，直击客官逻辑破绽进行深度论争"
+            title={isZh ? '加辣模式会让茶友表达更直接、更有辩论感。' : 'Spicy mode makes guests more direct and debate-oriented.'}
           >
             <Flame className={`w-3 h-3 ${spicyMode ? 'animate-bounce fill-current' : ''}`} />
-            <span>{spicyMode ? '🔥 劲辣开杠' : '🔥 注入辣味'}</span>
+            <span>{spicyMode ? (isZh ? '🔥 加辣已开' : '🔥 Spicy on') : (isZh ? '🔥 加辣模式' : '🔥 Spicy mode')}</span>
           </button>
 
           {/* Clear Room */}
@@ -647,7 +639,7 @@ ${speakingAgentsLabel}
             onClick={handleClearChat}
             className="border-2 border-black bg-white hover:bg-red-50 hover:text-red-700 p-1.5 text-xs font-mono font-bold transition-all cursor-pointer text-black"
             id="btn_clear_chat"
-            title="砸烂茶碗，抹除此雅间全部聊天记录"
+            title={isZh ? '清空当前茶馆聊天记录' : 'Clear this teahouse chat history'}
           >
             <Trash2 className="w-3.5 h-3.5" />
           </button>
@@ -660,7 +652,9 @@ ${speakingAgentsLabel}
           <div className="flex items-center gap-2">
             <span className="animate-pulse">📌</span>
             <span>
-              已为您单独指定提问 <strong>『{allAgents.find(a => a.id === designatedAgentId)?.name}』</strong>，本次开杠结果将仅有 TA 对您作出专属审议。
+              {isZh ? '已单独指定提问 ' : 'Direct question for '}
+              <strong>『{allAgents.find(a => a.id === designatedAgentId)?.name}』</strong>
+              {isZh ? '，本次将只由这位茶友回答。' : '. Only this guest will respond this time.'}
             </span>
           </div>
           <button
@@ -670,13 +664,13 @@ ${speakingAgentsLabel}
             }}
             className="text-[9px] bg-amber-400 text-black px-1.5 py-0.2 border border-black hover:bg-white transition-all cursor-pointer"
           >
-            解除指名 ✕
+            {isZh ? '取消指名' : 'Cancel target'} ✕
           </button>
         </div>
       )}
 
       {/* Messages Scroll Output Feed */}
-      <div className="flex-grow p-4 overflow-y-auto space-y-4 max-h-[380px] bg-neutral-50/50" id="message_scroller">
+      <div ref={messagesScrollerRef} className="relative flex-1 min-h-0 p-4 overflow-y-auto space-y-4 bg-neutral-50/50" id="message_scroller">
         {messages.map((m) => {
           if (m.role === 'system') {
             return (
@@ -700,7 +694,12 @@ ${speakingAgentsLabel}
           // Inject compression for raw codeblocks to maintain clean chat reading experience
           let displayText = m.text;
           if (hasHtmlCode && currentMode === 'text') {
-            displayText = m.text.replace(/```html[\s\S]*?```/gi, '\n\n【📋 网页沙箱模块已生成！点击上方「网页沙箱运行 🌐」选项卡，即可在这张对话框卡里直接试用、点选互动此原型游戏/文档设计！】\n');
+            displayText = m.text.replace(
+              /```html[\s\S]*?```/gi,
+              isZh
+                ? '\n\n【📋 已生成网页沙箱内容。点击上方「网页沙箱」标签，即可在当前对话卡片中试用。】\n'
+                : '\n\n[📋 Web sandbox content generated. Use the Sandbox tab above to preview it inside this message card.]\n'
+            );
           }
 
           return (
@@ -718,7 +717,7 @@ ${speakingAgentsLabel}
                     {m.username}
                     {m.userId === currentHost.id && (
                       <span className="bg-amber-500 text-white font-mono px-1 pb-0.5 text-[8px] font-black border border-black ml-1.5 shadow-[1px_1px_0px_0px_rgba(0,0,0,1)] select-none">
-                        堂倌/总调度 🤵🏽
+                        {isZh ? '主持调度' : 'Host'} 🤵🏽
                       </span>
                     )}
                   </span>
@@ -735,21 +734,21 @@ ${speakingAgentsLabel}
                       onClick={() => setMessageViewModes(prev => ({ ...prev, [m.id]: 'text' }))}
                       className={`px-2.5 py-1 font-black cursor-pointer transition-all ${currentMode === 'text' ? 'bg-amber-100 text-black' : 'bg-white text-zinc-600'}`}
                     >
-                      💬 对话论证
+                      💬 {isZh ? '对话' : 'Chat'}
                     </button>
                     <button
                       type="button"
                       onClick={() => setMessageViewModes(prev => ({ ...prev, [m.id]: 'sandbox' }))}
                       className={`px-2.5 py-1 font-black cursor-pointer transition-all flex items-center gap-1 ${currentMode === 'sandbox' ? 'bg-emerald-100 text-black animate-pulse' : 'bg-white text-zinc-600'}`}
                     >
-                      🌐 网页沙箱运行
+                      🌐 {isZh ? '网页沙箱' : 'Sandbox'}
                     </button>
                     <button
                       type="button"
                       onClick={() => setMessageViewModes(prev => ({ ...prev, [m.id]: 'source' }))}
                       className={`px-2.5 py-1 font-black cursor-pointer transition-all ${currentMode === 'source' ? 'bg-zinc-800 text-white' : 'bg-white text-zinc-600'}`}
                     >
-                      💻 源码视图
+                      💻 {isZh ? '源码' : 'Source'}
                     </button>
                   </div>
                 )}
@@ -770,7 +769,7 @@ ${speakingAgentsLabel}
                 {currentMode === 'sandbox' && hasHtmlCode && (
                   <div className="border-2 border-black bg-white p-1 relative shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] w-full md:max-w-xl lg:max-w-2xl animate-fade-in">
                     <div className="flex justify-between items-center bg-neutral-100 p-2 border-b-2 border-black text-[10px] font-mono font-bold">
-                      <span className="flex items-center gap-1 text-black">🚀 沙箱环境自主渲染运行并激活 (Running Live Sandbox)</span>
+                      <span className="flex items-center gap-1 text-black">🚀 {isZh ? '网页沙箱运行中' : 'Live sandbox running'}</span>
                       <div className="flex gap-1.5">
                         <button
                           type="button"
@@ -780,12 +779,12 @@ ${speakingAgentsLabel}
                               win.document.write(extractedHtml);
                               win.document.close();
                             } else {
-                              alert('弹窗已拦截！请开启此页面的全屏权限。');
+                              alert(isZh ? '浏览器拦截了新窗口，请允许此页面打开弹窗。' : 'The browser blocked the new window. Allow pop-ups for this page.');
                             }
                           }}
                           className="px-1.5 py-0.5 border border-black bg-white hover:bg-neutral-50 text-[9px] cursor-pointer"
                         >
-                          全屏独立测试 ↗
+                          {isZh ? '新窗口打开' : 'Open'} ↗
                         </button>
                         <button
                           type="button"
@@ -794,13 +793,13 @@ ${speakingAgentsLabel}
                             const url = URL.createObjectURL(blob);
                             const a = document.createElement('a');
                             a.href = url;
-                            a.download = `tea_sandbox_${m.id}.html`;
+                            a.download = `carbon_silicon_teahouse_sandbox_${m.id}.html`;
                             a.click();
                             URL.revokeObjectURL(url);
                           }}
                           className="px-1.5 py-0.5 border border-black bg-black text-white text-[9px] cursor-pointer"
                         >
-                          保存到本地 💾
+                          {isZh ? '下载' : 'Download'} 💾
                         </button>
                       </div>
                     </div>
@@ -817,16 +816,16 @@ ${speakingAgentsLabel}
                 {currentMode === 'source' && hasHtmlCode && (
                   <div className="border-2 border-black bg-zinc-950 text-zinc-100 p-3 font-mono text-xs overflow-auto max-h-[350px] w-full md:max-w-xl lg:max-w-2xl shadow-[3px_3px_0px_0px_rgba(0,0,0,1)]">
                     <div className="flex justify-between items-center text-zinc-400 border-b border-zinc-800 pb-1.5 mb-2 text-[10px]">
-                      <span>SANDBOX SOURCE ({extractedHtml.length} 字节)</span>
+                      <span>{isZh ? '沙箱源码' : 'Sandbox source'} ({extractedHtml.length} {isZh ? '字节' : 'bytes'})</span>
                       <button
                         type="button"
                         onClick={() => {
                           navigator.clipboard.writeText(extractedHtml);
-                          alert('HTML 源代码已全盘复制！');
+                          alert(isZh ? 'HTML 源代码已复制。' : 'HTML source copied.');
                         }}
                         className="px-2 py-0.5 border border-zinc-700 bg-zinc-800 hover:bg-zinc-700 text-[9px] cursor-pointer"
                       >
-                        全选复制代码
+                        {isZh ? '复制代码' : 'Copy code'}
                       </button>
                     </div>
                     <pre className="whitespace-pre-wrap leading-tight text-[11px] font-mono text-emerald-300 select-all">{extractedHtml}</pre>
@@ -848,35 +847,46 @@ ${speakingAgentsLabel}
               <span className="text-[10px] font-black font-sans text-neutral-600">{thinkingAgent}</span>
               <div className="p-2.5 border-2 border-black bg-neutral-100 rounded-none shadow-[3px_3px_0px_0px_rgba(0,0,0,1)] flex items-center gap-2 text-xs font-mono">
                 <Loader2 className="w-4 h-4 animate-spin text-black" />
-                <span>正在端杯品茶，酝酿【{thinkingAgent}】的交锋说词...</span>
+                <span>{isZh ? `正在等待【${thinkingAgent}】回应...` : `Waiting for ${thinkingAgent} to respond...`}</span>
               </div>
             </div>
           </div>
         )}
 
-        <div ref={messagesEndRef} />
+        {/* Global connection error message */}
+        {errorMsg && (
+          <div className="p-2 border bg-red-50 text-red-800 border-red-300 text-xs font-mono flex flex-col md:flex-row md:items-center justify-between gap-2" id="chat_error_box">
+            <p className="font-semibold">⚠️ {isZh ? '请求失败：' : 'Request failed: '}{errorMsg}</p>
+            <button
+              onClick={onOpenSettings}
+              className="border border-black bg-black text-white text-[10px] px-2 py-0.5 font-mono cursor-pointer shrink-0 hover:bg-white hover:text-black"
+            >
+              {isZh ? '检查配置' : 'Check settings'} ⚙
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Typing & Action bar bottom cluster */}
-      <div className="border-t-4 border-black p-3 bg-white shrink-0 space-y-3" id="input_panel_wrapper">
+      <div className="border-t-4 border-black p-2.5 bg-white shrink-0 space-y-2.5 h-[212px] overflow-y-auto" id="input_panel_wrapper">
         
         {/* Dynamic Host Topic Suggestions & Idle Tips */}
         {suggestions.length > 0 && (
           <div className="space-y-1.5" id="host_guidance_block">
             {/* Active Idle Hint Callout */}
             {isIdle ? (
-              <div className="flex items-center gap-1.5 text-[11px] text-amber-800 font-mono font-bold animate-pulse bg-amber-50 p-2 border border-dashed border-amber-400">
+              <div className="flex items-center gap-1.5 text-[11px] text-amber-800 font-mono font-bold animate-pulse bg-amber-50 p-1.5 border border-dashed border-amber-400">
                 <span>{currentHost.avatar}</span>
                 <span>
-                  {teahouseId === 'th_jinli_memory' && `【堂倌二娃过来续茶】: “客官师兄，盖碗茶焖得久咯！二娃推荐您撮个热乎话题唠唠：”`}
-                  {teahouseId === 'th_cyber_silicon' && `【总控主频调度警报】: “检测到指令线中断。操作员，输入端推荐重新激活以下任一核心逻辑：”`}
-                  {teahouseId === 'th_qingcheng_wellness' && `【小师妹托腮温水】: “师兄，手持温茶，闭目片刻。得空了再点点下边的话题，叫先生开讲：”`}
+                  {teahouseId === 'th_ai_lounge' && (isZh ? 'AI 茶馆暂时安静了。选一个话题，继续聊聊模型和产品。' : 'The AI room is quiet. Pick a prompt and reopen the model or product discussion.')}
+                  {teahouseId === 'th_agent_lounge' && (isZh ? 'Agent 茶馆暂时空闲。选一个任务话题，让各位茶友继续拆解。' : 'The Agent room is idle. Pick a task prompt and let the guests break it down.')}
+                  {teahouseId === 'th_enterprise_ai' && (isZh ? '企业 AI 茶馆正在等下一题。选一个话题，继续推进落地讨论。' : 'The enterprise AI room is waiting. Pick a topic to continue the rollout discussion.')}
                 </span>
               </div>
             ) : (
               <div className="flex items-center gap-1.5 text-[10px] text-zinc-500 font-mono font-bold">
                 <Sparkles className="w-3 h-3 text-amber-500 animate-spin" />
-                <span>{currentHost.name} 堂前提议新议题 (点击快速调度席上大佬)：</span>
+                <span>{isZh ? `${currentHost.name} 推荐话题（点击后自动调度茶友）：` : `${currentHost.name} suggested prompts:`}</span>
               </div>
             )}
 
@@ -888,10 +898,10 @@ ${speakingAgentsLabel}
                   type="button"
                   disabled={loading}
                   onClick={() => handleSendMessage(undefined, sug)}
-                  className="flex flex-col justify-between p-2 text-left bg-zinc-50 hover:bg-amber-50/50 border-2 border-black text-[10.5px] leading-snug font-sans text-neutral-800 transition-all cursor-pointer hover:-translate-y-0.5 hover:shadow-[2px_2px_0px_0px_rgba(0,0,0,1)] disabled:opacity-50 disabled:pointer-events-none"
+                  className="flex flex-col justify-between p-1.5 text-left bg-zinc-50 hover:bg-amber-50/50 border-2 border-black text-[10.5px] leading-snug font-sans text-neutral-800 transition-all cursor-pointer hover:-translate-y-0.5 hover:shadow-[2px_2px_0px_0px_rgba(0,0,0,1)] disabled:opacity-50 disabled:pointer-events-none"
                 >
                   <span className="font-bold flex-grow pr-1 text-zinc-900">{sug}</span>
-                  <span className="text-[8px] bg-neutral-900 text-white px-1 py-0.2 mt-1.5 font-mono uppercase w-fit rounded-none">点击开杠 ⚡</span>
+                  <span className="text-[8px] bg-neutral-900 text-white px-1 py-0.2 mt-1.5 font-mono uppercase w-fit rounded-none">{isZh ? '点击讨论' : 'Discuss'} ⚡</span>
                 </button>
               ))}
             </div>
@@ -899,16 +909,16 @@ ${speakingAgentsLabel}
         )}
 
         {/* Quick Roundtable Actions drawer (Add water / Generate outcome summaries) */}
-        <div className="flex flex-wrap gap-2 justify-between items-center bg-neutral-50 p-2 border-2 border-dashed border-black" id="action_triggers_bar">
+        <div className="flex flex-wrap gap-2 justify-between items-center bg-neutral-50 p-1.5 border-2 border-dashed border-black" id="action_triggers_bar">
           <button
             type="button"
             onClick={handleProactiveAddTea}
             disabled={loading}
             className="px-2.5 py-1 bg-white border-2 border-black text-[10.5px] font-mono font-black hover:bg-neutral-50 cursor-pointer disabled:opacity-50 flex items-center gap-1"
-            title="催促其中一位在席茶客发言加入，打破谈话僵局"
+            title={isZh ? '随机邀请一位在席茶友继续发言。' : 'Invite a random active guest to continue the discussion.'}
           >
             <Wine className="w-3.5 h-3.5 stroke-[2.5]" />
-            <span>掺茶续杯 🍵 (随机催人发言)</span>
+            <span>{isZh ? '邀请茶友发言' : 'Invite a guest'} 🍵</span>
           </button>
 
           <button
@@ -916,17 +926,17 @@ ${speakingAgentsLabel}
             onClick={handleGenerateReport}
             disabled={summarizing || loading}
             className="px-3 py-1 bg-black text-white border-2 border-black text-[11.5px] font-mono font-black hover:bg-white hover:text-black cursor-pointer disabled:opacity-50 flex items-center gap-1 shadow-[2px_2px_0px_0px_rgba(0,0,0,1)]"
-            title="多茶友论点整合汇编，并下载一份高逼格折子"
+            title={isZh ? '整合当前茶馆的多角色讨论内容。' : 'Summarize the current multi-agent discussion.'}
           >
             {summarizing ? (
               <>
                 <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                <span>正在磨墨铺纸汇总...</span>
+                <span>{isZh ? '正在生成总结...' : 'Summarizing...'}</span>
               </>
             ) : (
               <>
                 <FileText className="w-3.5 h-3.5 text-yellow-300" />
-                <span>堂前结案陈词 📜 (汇总终结大折子)</span>
+                <span>{isZh ? '生成讨论总结' : 'Generate summary'} 📜</span>
               </>
             )}
           </button>
@@ -936,7 +946,7 @@ ${speakingAgentsLabel}
         <form onSubmit={handleSendMessage} className="flex gap-2" id="chat_submit_form">
           <input
             type="text"
-            placeholder={loading ? `${thinkingAgent} 整理说辞中，请客官慢用盖碗茶...` : "输入您的高论或反驳，直接开杠 (回车发送)..."}
+            placeholder={loading ? (isZh ? `${thinkingAgent} 正在整理回复...` : `${thinkingAgent} is preparing a reply...`) : (isZh ? '输入你的问题或观点，按回车发送...' : 'Type your question or idea, then press Enter...')}
             value={inputValue}
             onChange={(e) => setInputValue(e.target.value)}
             disabled={loading}
@@ -950,22 +960,9 @@ ${speakingAgentsLabel}
             id="btn_send_chat_message"
           >
             <Send className="w-3.5 h-3.5" />
-            <span>开杠 ⚡</span>
+            <span>{isZh ? '发送' : 'Send'} ⚡</span>
           </button>
         </form>
-
-        {/* Global connection error banners */}
-        {errorMsg && (
-          <div className="p-2 border bg-red-50 text-red-800 border-red-300 text-xs font-mono flex flex-col md:flex-row md:items-center justify-between gap-2" id="chat_error_box">
-            <p className="font-semibold">⚠️ 无法开炉: {errorMsg}</p>
-            <button
-              onClick={onOpenSettings}
-              className="border border-black bg-black text-white text-[10px] px-2 py-0.5 font-mono cursor-pointer shrink-0 hover:bg-white hover:text-black"
-            >
-              立刻去右上角修补端点参数 ⚙
-            </button>
-          </div>
-        )}
 
         {/* Summary output status and download file generators row */}
         {summaryStatusMessage && (
@@ -977,14 +974,14 @@ ${speakingAgentsLabel}
                   onClick={() => copyToClipboard(summaryHtml)}
                   className="bg-white border border-black hover:bg-neutral-100 text-[10px] font-mono px-3 py-1 cursor-pointer flex items-center gap-1 font-bold"
                 >
-                  <Copy className="w-3 h-3" /> 复制 HTML 代码
+                  <Copy className="w-3 h-3" /> {isZh ? '复制 HTML 代码' : 'Copy HTML'}
                 </button>
                 <a
                   href={`data:text/html;charset=utf-8,${encodeURIComponent(summaryHtml)}`}
-                  download={`long_men_zhen_${teahouseId}_summary.html`}
+                  download={`carbon_silicon_teahouse_${teahouseId}_summary.html`}
                   className="bg-neutral-900 border border-black text-white hover:bg-black text-[10px] font-mono px-3 py-1 cursor-pointer flex items-center gap-1 font-bold shadow-[2px_2px_0px_0px_rgba(0,0,0,1)]"
                 >
-                  <Download className="w-3 h-3 text-white" /> 下载 HTML 结案折页.html
+                  <Download className="w-3 h-3 text-white" /> {isZh ? '下载 HTML 总结' : 'Download HTML'}
                 </a>
               </div>
             )}

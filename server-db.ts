@@ -1,6 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import { Room, RoomSession, Message, Participant } from './src/types';
+import { DEFAULT_LLM_ENDPOINT_PATH, DEFAULT_LLM_MODEL } from './src/constants';
 
 // Portable interface definitions
 export interface AdminAccount {
@@ -12,6 +13,7 @@ export interface AdminAccount {
 export interface SystemSettings {
   apiKey: string;
   baseUrl: string;
+  endpointPath: string;
   model: string;
 }
 
@@ -33,7 +35,8 @@ let memoryDb: DBStorage = {
   settings: {
     apiKey: '',
     baseUrl: '',
-    model: 'gemini-3.1-flash-lite'
+    endpointPath: DEFAULT_LLM_ENDPOINT_PATH,
+    model: DEFAULT_LLM_MODEL
   },
   admins: {},
   rooms: {},
@@ -52,7 +55,8 @@ function loadDatabase(): DBStorage {
       const data = JSON.parse(content) as DBStorage;
       
       // Upgrade safety check
-      if (!data.settings) data.settings = { apiKey: '', baseUrl: '', model: 'gemini-3.1-flash-lite' };
+      if (!data.settings) data.settings = { apiKey: '', baseUrl: '', endpointPath: DEFAULT_LLM_ENDPOINT_PATH, model: DEFAULT_LLM_MODEL };
+      if (!data.settings.endpointPath) data.settings.endpointPath = DEFAULT_LLM_ENDPOINT_PATH;
       if (!data.admins) data.admins = {};
       if (!data.rooms) data.rooms = {};
       if (!data.messages) data.messages = {};
@@ -97,14 +101,20 @@ export const serverDb = {
   // 1. Settings management
   getSettings(): SystemSettings {
     // Read from environment overrides first if configured (best for stateless platforms like Cloudflare)
-    let envKey = (process.env.GEMINI_API_KEY || '').trim();
+    let envKey = (process.env.LLM_API_KEY || process.env.GEMINI_API_KEY || '').trim();
     envKey = envKey.replace(/^["']|["']$/g, '').trim();
-    if (envKey === 'MY_GEMINI_API_KEY' || envKey === 'YOUR_API_KEY' || envKey === 'MY_API_KEY') {
+    if (envKey === 'MY_LLM_API_KEY' || envKey === 'YOUR_API_KEY' || envKey === 'MY_API_KEY') {
       envKey = '';
     }
 
-    let envBase = (process.env.GEMINI_BASE_URL || process.env.API_BASE_URL || '').trim();
+    let envBase = (process.env.LLM_BASE_URL || process.env.GEMINI_BASE_URL || process.env.API_BASE_URL || '').trim();
     envBase = envBase.replace(/^["']|["']$/g, '').trim();
+
+    let envEndpointPath = (process.env.LLM_ENDPOINT_PATH || '').trim();
+    envEndpointPath = envEndpointPath.replace(/^["']|["']$/g, '').trim();
+    if (envEndpointPath && !envEndpointPath.startsWith('/')) {
+      envEndpointPath = `/${envEndpointPath}`;
+    }
 
     let envModel = (process.env.LLM_MODEL || '').trim();
     envModel = envModel.replace(/^["']|["']$/g, '').trim();
@@ -112,13 +122,18 @@ export const serverDb = {
     return {
       apiKey: memoryDb.settings.apiKey || envKey,
       baseUrl: memoryDb.settings.baseUrl || envBase || '',
-      model: memoryDb.settings.model || envModel || 'gemini-3.1-flash-lite'
+      endpointPath: memoryDb.settings.endpointPath || envEndpointPath || DEFAULT_LLM_ENDPOINT_PATH,
+      model: memoryDb.settings.model || envModel || DEFAULT_LLM_MODEL
     };
   },
 
-  saveSettings(apiKey?: string, baseUrl?: string, model?: string) {
+  saveSettings(apiKey?: string, baseUrl?: string, endpointPath?: string, model?: string) {
     if (apiKey !== undefined) memoryDb.settings.apiKey = apiKey;
     if (baseUrl !== undefined) memoryDb.settings.baseUrl = baseUrl;
+    if (endpointPath !== undefined) {
+      const trimmedPath = endpointPath.trim();
+      memoryDb.settings.endpointPath = trimmedPath ? (trimmedPath.startsWith('/') ? trimmedPath : `/${trimmedPath}`) : DEFAULT_LLM_ENDPOINT_PATH;
+    }
     if (model !== undefined) memoryDb.settings.model = model;
     saveDatabase();
   },

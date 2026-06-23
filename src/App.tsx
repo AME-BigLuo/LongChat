@@ -1,24 +1,29 @@
 import React, { useState, useEffect } from 'react';
-import { Sparkles, Key, HelpCircle, AlertCircle, Heart, User, Coffee, Info, ShieldCheck } from 'lucide-react';
+import { Key, Heart, User, Coffee } from 'lucide-react';
 import SettingsModal from './components/SettingsModal';
 import TeahouseList from './components/TeahouseList';
 import AgentSeats from './components/AgentSeats';
 import AgentChat from './components/AgentChat';
 import { PRESET_TEAHOUSES } from './data/teahouseData';
-import { AgentTemplate } from './types';
+import { AgentTemplate, AppLanguage } from './types';
 import { getLLMConfig } from './llmService';
+import { APP_COPYRIGHT, APP_NAME, STORAGE_KEYS } from './constants';
 
 export default function App() {
   const [showSettings, setShowSettings] = useState(false);
   const [hasApiKey, setHasApiKey] = useState(false);
+  const [uiScale, setUiScale] = useState(1);
+  const [language, setLanguage] = useState<AppLanguage>(() => {
+    return (localStorage.getItem(STORAGE_KEYS.language) as AppLanguage) || 'zh';
+  });
   
   // User customizable nickname
   const [userNickname, setUserNickname] = useState(() => {
-    return localStorage.getItem('longmenzhen_user_nickname') || '发起人老张';
+    return localStorage.getItem(STORAGE_KEYS.nickname) || '发起人老张';
   });
 
   // Selected active Teahouse Chamber (defaults to Jinli Storyteller Teahouse)
-  const [activeTeahouseId, setActiveTeahouseId] = useState<string>('th_jinli_memory');
+  const [activeTeahouseId, setActiveTeahouseId] = useState<string>(PRESET_TEAHOUSES[0]?.id || '');
 
   // Multi-Agent selection list per teahouse
   const [activeAgentIdsByTeahouse, setActiveAgentIdsByTeahouse] = useState<Record<string, string[]>>({});
@@ -34,6 +39,28 @@ export default function App() {
     checkApiKeyStatus();
     loadAllCustomAgents();
   }, []);
+
+  useEffect(() => {
+    const updateScale = () => {
+      const widthScale = window.innerWidth / 1440;
+      const heightScale = window.innerHeight / 980;
+      const nextScale = 1.3 * Math.min(1, widthScale, heightScale);
+      setUiScale(Math.max(0.72, Math.round(nextScale * 100) / 100));
+    };
+
+    updateScale();
+    window.addEventListener('resize', updateScale);
+    return () => window.removeEventListener('resize', updateScale);
+  }, []);
+
+  useEffect(() => {
+    document.title = APP_NAME;
+  }, []);
+
+  const handleLanguageChange = (nextLanguage: AppLanguage) => {
+    setLanguage(nextLanguage);
+    localStorage.setItem(STORAGE_KEYS.language, nextLanguage);
+  };
 
   const checkApiKeyStatus = async () => {
     const config = getLLMConfig();
@@ -58,7 +85,7 @@ export default function App() {
   const loadAllCustomAgents = () => {
     const map: Record<string, AgentTemplate[]> = {};
     PRESET_TEAHOUSES.forEach(th => {
-      const key = `longmenzhen_custom_agents_v2_${th.id}`;
+      const key = STORAGE_KEYS.customAgents(th.id);
       const stored = localStorage.getItem(key);
       if (stored) {
         try {
@@ -76,7 +103,7 @@ export default function App() {
   const handleNicknameChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const val = e.target.value.trim();
     setUserNickname(val);
-    localStorage.setItem('longmenzhen_user_nickname', val);
+    localStorage.setItem(STORAGE_KEYS.nickname, val);
   };
 
   // Get active teahouse configuration info
@@ -111,81 +138,70 @@ export default function App() {
   });
 
   return (
-    <div className="min-h-screen bg-neutral-100 text-black flex flex-col p-2 sm:p-4 font-sans" id="app_root">
+    <div
+      className="min-h-screen bg-neutral-100 text-black flex flex-col font-sans"
+      id="app_root"
+      style={{ ['--ui-scale' as any]: uiScale }}
+    >
       
       {/* Brutalist Frame Container */}
-      <div className="flex-grow bg-white border-4 md:border-8 border-black flex flex-col relative" id="app_frame">
+      <div className="flex-grow bg-white flex flex-col relative app_scale_shell" id="app_frame">
         
         {/* Sichuan Teahouse Top Navigation Header */}
-        <header className="border-b-4 border-black bg-white py-4 px-4 sm:px-6 sticky top-0 z-40 transition-all shrink-0" id="main_nav_header">
-          <div className="max-w-7xl mx-auto flex flex-col sm:flex-row justify-between items-center gap-3" id="nav_wrapper">
+        <header className="border-b-4 border-black bg-white h-[46.2px] px-3 sm:px-4 sticky top-0 z-50 transition-all shrink-0" id="main_nav_header">
+          <div className="max-w-7xl mx-auto h-full flex flex-col sm:flex-row justify-between items-center gap-1" id="nav_wrapper">
             
             {/* Logo */}
-            <div className="flex items-center gap-2.5 cursor-pointer" onClick={() => window.location.reload()} id="nav_logo">
-              {/* Sichuan Pixel-style Cube Logo */}
-              <div className="grid grid-cols-2 gap-0.5 border-4 border-black p-0.5 shrink-0 bg-black">
-                <div className="w-3.5 h-3.5 bg-white"></div>
-                <div className="w-3.5 h-3.5 bg-black"></div>
-                <div className="w-3.5 h-3.5 bg-black"></div>
-                <div className="w-3.5 h-3.5 bg-white"></div>
-              </div>
-              <div className="flex items-baseline gap-1.5">
-                <h1 className="text-xl md:text-2xl font-black tracking-tighter uppercase text-black">
-                  龙门阵 · 围炉茶友会
-                </h1>
-                <span className="text-[9px] font-bold border-2 border-black px-1.5 py-0.2 bg-amber-100 uppercase hidden sm:inline-block">
-                  多 Agent 1对多群聊系统
+            <div className="flex items-center gap-2 cursor-pointer" onClick={() => window.location.reload()} id="nav_logo">
+              <img
+                src="/cs-logo.png"
+                alt={APP_NAME}
+                className="h-4 sm:h-5 w-auto object-contain shrink-0"
+              />
+              <div className="flex items-center gap-1.5">
+                <span className="text-[8px] font-bold border-2 border-black px-1.5 py-0 bg-amber-100 uppercase hidden sm:inline-block">
+                  {language === 'zh' ? '多 Agent 茶馆' : 'Multi-Agent Teahouse'}
                 </span>
-                <span className="text-[9px] font-bold border-2 border-dashed border-emerald-600 px-1.5 py-0.2 bg-emerald-50 text-emerald-800 uppercase hidden lg:inline-block">
-                  内置互动沙箱 🌍
+                <span className="text-[8px] font-bold border-2 border-dashed border-emerald-600 px-1.5 py-0 bg-emerald-50 text-emerald-800 uppercase hidden lg:inline-block">
+                  {language === 'zh' ? '开源讨论空间' : 'Open Source Lounge'}
                 </span>
               </div>
             </div>
 
-            {/* Quick API Key status badge & Action Button */}
-            <div className="flex items-center gap-2" id="nav_right_actions">
-              {hasApiKey ? (
-                <div className="hidden md:flex items-center gap-1 border border-emerald-500 bg-emerald-50 text-emerald-900 px-2 py-0.8 text-[11px] font-mono font-bold">
-                  <ShieldCheck className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
-                  <span>服务核心就绪</span>
-                </div>
-              ) : (
-                <div className="hidden md:flex items-center gap-1 border border-amber-500 bg-amber-50 text-amber-900 px-2 py-0.8 text-[10px] font-mono font-bold">
-                  <AlertCircle className="w-3.5 h-3.5 text-amber-600 shrink-0" />
-                  <span>缺少密钥，请右侧配置</span>
-                </div>
-              )}
+            {/* Settings and language switch */}
+            <div className="flex flex-col items-end" id="nav_right_actions">
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => setShowSettings(true)}
+                  className={`border-3 border-black px-2 py-0 text-[9px] font-mono font-black uppercase tracking-wider transition-all cursor-pointer flex items-center gap-1 h-5 ${hasApiKey ? 'bg-black text-white hover:bg-neutral-800' : 'bg-yellow-300 text-black hover:bg-black hover:text-white'}`}
+                  id="btn_open_settings_panel"
+                >
+                  <Key className="w-2.5 h-2.5 stroke-[2.5]" />
+                  <span>{hasApiKey ? (language === 'zh' ? '配置' : 'Settings') : (language === 'zh' ? '配置 Key' : 'Configure Key')}</span>
+                </button>
 
-              <button
-                onClick={() => setShowSettings(true)}
-                className={`border-3 border-black px-3 py-1.5 text-xs font-mono font-black uppercase tracking-wider transition-all cursor-pointer flex items-center gap-1.5 ${hasApiKey ? 'bg-black text-white hover:bg-neutral-800' : 'bg-yellow-300 text-black hover:bg-black hover:text-white animate-pulse'}`}
-                id="btn_open_settings_panel"
-              >
-                <Key className="w-3.5 h-3.5 stroke-[2.5]" />
-                <span>{hasApiKey ? '⚙ 适配参数配置' : '⚙ 设置 API Key'}</span>
-              </button>
+                <div className="flex border-2 border-black bg-white text-[8px] font-mono font-black overflow-hidden h-5" id="language_switch">
+                  <button
+                    type="button"
+                    onClick={() => handleLanguageChange('zh')}
+                    className={`px-2 py-0.5 cursor-pointer ${language === 'zh' ? 'bg-black text-white' : 'bg-white text-black hover:bg-neutral-100'}`}
+                  >
+                    中文
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleLanguageChange('en')}
+                    className={`px-2 py-0.5 border-l-2 border-black cursor-pointer ${language === 'en' ? 'bg-black text-white' : 'bg-white text-black hover:bg-neutral-100'}`}
+                  >
+                    EN
+                  </button>
+                </div>
+              </div>
+
             </div>
 
           </div>
         </header>
-
-        {/* Info Banner if missing Key altogether */}
-        {!hasApiKey && (
-          <div className="bg-yellow-50 border-b-2 border-black p-3.5 text-xs font-mono text-amber-950 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 animate-pulse" id="key_alert_banner">
-            <div className="flex items-center gap-2">
-              <AlertCircle className="w-4 h-4 text-amber-700 shrink-0 animate-bounce" />
-              <span>
-                <strong>提醒：</strong>大模型服务未适配。请先点击右上角按钮输入您的 API Key（支持官方直连与自定义中转），以便开启多 AI 围炉群聊龙门阵。
-              </span>
-            </div>
-            <button
-              onClick={() => setShowSettings(true)}
-              className="border border-black bg-black text-white text-[10px] px-2.5 py-1 font-bold font-mono hover:bg-neutral-100 hover:text-black cursor-pointer shadow-[1px_1px_0px_rgba(0,0,0,1)]"
-            >
-              一键去配置
-            </button>
-          </div>
-        )}
 
         {/* Main Workspace Frame */}
         <main className="flex-grow p-3 sm:p-5 flex flex-col justify-start bg-neutral-50" id="main_lobby_container">
@@ -198,11 +214,11 @@ export default function App() {
               <div className="border-4 border-black p-4 bg-white shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] space-y-2.5" id="user_profile_seat_box">
                 <h3 className="text-xs font-mono font-black uppercase tracking-wider flex items-center gap-1 text-black border-b-2 border-black pb-1.5">
                   <Coffee className="w-3.5 h-3.5 text-black" />
-                  <span>1. 确认您的茶座身份 (Your Identity)</span>
+                  <span>{language === 'zh' ? '1. 确认你的茶座身份' : '1. Your Identity'}</span>
                 </h3>
                 <div className="space-y-1.5">
                   <label className="block text-xs font-bold text-neutral-600">
-                    客官，摆阵商谈时，诸位茶友怎么称呼您？
+                    {language === 'zh' ? '茶馆里的各位茶友应该怎么称呼你？' : 'How should the tea house call you?'}
                   </label>
                   <div className="relative">
                     <User className="absolute left-2.5 top-2.5 w-4 h-4 text-neutral-400" />
@@ -210,13 +226,13 @@ export default function App() {
                       type="text"
                       value={userNickname}
                       onChange={handleNicknameChange}
-                      placeholder="例如: 阵主阿张"
+                      placeholder={language === 'zh' ? '例如：张老板' : 'e.g. Teahouse Host Zhang'}
                       className="w-full bg-white border-2 border-black pl-8 pr-3 py-1.5 text-xs sm:text-sm text-black font-extrabold focus:outline-none"
                       id="input_global_user_nickname"
                     />
                   </div>
                   <p className="text-[9.5px] text-neutral-400 font-mono">
-                    * AI 阵友在发言过招或结案提炼册子时会据此称呼客官。
+                    {language === 'zh' ? '* AI 茶友发言和总结时会使用这个称呼。' : '* AI guests will use this name while speaking and summarizing.'}
                   </p>
                 </div>
               </div>
@@ -229,6 +245,7 @@ export default function App() {
                   setTriggerAction(null); // Clear any dangling poke actions
                 }}
                 customActiveCounts={customActiveCounts}
+                language={language}
               />
 
               {/* 3. Seating Lists of Tea Friends */}
@@ -242,16 +259,8 @@ export default function App() {
                 onDirectPoke={(agId) => setTriggerAction({ agentId: agId, action: 'poke', timestamp: Date.now() })}
                 onOpenSettings={() => setShowSettings(true)}
                 onCustomAgentsUpdated={loadAllCustomAgents}
+                language={language}
               />
-
-              {/* Secure sandbox local contract */}
-              <div className="border-2 border-dashed border-neutral-400 p-3 bg-neutral-100 text-[10px] sm:text-xs text-neutral-500 font-mono leading-relaxed" id="local_privacy_banner">
-                <span className="font-extrabold text-black block mb-0.5 flex items-center gap-1">
-                  <Info className="w-3.5 h-3.5 text-neutral-500 shrink-0" />
-                  龙门茶座保密契约：
-                </span>
-                本平台支持<strong>纯净离线安全体系</strong>。所有聊天流、客官资料、定制茶友底稿全部本地密封存储在您的浏览器中（LocalStorage）。关掉页面不存任何中继后遗症。点击「砸烂茶碗」大阵即化。
-              </div>
 
             </div>
 
@@ -268,6 +277,7 @@ export default function App() {
                   onOpenSettings={() => setShowSettings(true)}
                   triggerAction={triggerAction}
                   onClearTrigger={() => setTriggerAction(null)}
+                  language={language}
                 />
               </div>
             </div>
@@ -276,13 +286,23 @@ export default function App() {
         </main>
 
         {/* Footer block */}
-        <footer className="border-t-4 border-black py-4 px-6 bg-white text-center text-xs font-mono text-neutral-500 shrink-0" id="main_footer_box">
-          <div className="max-w-6xl mx-auto flex flex-col sm:flex-row justify-between items-center gap-2">
-            <span>© 2026 龙门阵 · 围炉大合唱茶友楼 (Sichuan AI Multi-Agent Sandbox Lounge)</span>
+        <footer className="border-t-2 border-black py-4 px-6 bg-white text-center text-xs font-mono text-neutral-500 shrink-0" id="main_footer_box">
+          <div className="max-w-6xl mx-auto space-y-2">
+            <div className="text-[10px] sm:text-xs text-neutral-500 leading-relaxed">
+              <span className="font-extrabold text-black">
+                {language === 'zh' ? '开源隐私说明：' : 'Open-source privacy note: '}
+              </span>
+              {language === 'zh'
+                ? '聊天记录、用户称呼和自定义茶友都保存在你的浏览器本地。仓库内不应包含任何私有项目数据或密钥。'
+                : 'Chat history, nickname, and custom guests stay in your browser. The repository should not contain private project data or secrets.'}
+            </div>
+            <div className="flex flex-col sm:flex-row justify-between items-center gap-2">
+            <span>{APP_COPYRIGHT}</span>
             <span className="font-bold text-black flex items-center gap-1">
-              <span>Crafted proudly in Studio</span>
+              <span>{language === 'zh' ? '为开放实验而构建' : 'Built for open experimentation'}</span>
               <Heart className="w-3 h-3 text-red-500 fill-current" />
             </span>
+            </div>
           </div>
         </footer>
 
@@ -295,6 +315,7 @@ export default function App() {
           onConfigSaved={() => {
             checkApiKeyStatus();
           }}
+          language={language}
         />
       )}
 

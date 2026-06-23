@@ -47,3 +47,6 @@ export interface RoomSession {
   participants: Record<string, Participant>;
   messages: Message[];
 }
+
+export type TeahouseThemeKey = 'ai' | 'agent' | 'enterprise';
+export type AppLanguage = 'zh' | 'en';

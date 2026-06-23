@@ -10,36 +10,43 @@ dotenv.config();
 import { GoogleGenAI } from '@google/genai';
 import { Room, RoomSession, Message, Participant } from './src/types';
 import { serverDb } from './server-db';
+import { DEFAULT_LLM_ENDPOINT_PATH, DEFAULT_LLM_MODEL, APP_NAME } from './src/constants';
 
 const app = express();
-const PORT = 3000;
+const PORT = 3001;
 
 app.use(express.json());
+
+function normalizeEndpointPath(pathValue?: string): string {
+  const trimmed = (pathValue || DEFAULT_LLM_ENDPOINT_PATH).trim().replace(/^["']|["']$/g, '').trim();
+  if (!trimmed) return DEFAULT_LLM_ENDPOINT_PATH;
+  return trimmed.startsWith('/') ? trimmed : `/${trimmed}`;
+}
+
+function buildEndpointUrl(baseUrl: string, endpointPath?: string): string {
+  const base = (baseUrl || '').trim().replace(/\/+$/, '');
+  const pathValue = normalizeEndpointPath(endpointPath);
+  if (!base) return pathValue;
+  if (base.endsWith(pathValue)) return base;
+  return `${base}${pathValue}`;
+}
 
 // Helper to interact with the chosen model / endpoint
 async function generateLLMResponse(systemInstruction: string, prompt: string, modelOverride?: string): Promise<string> {
   const settings = serverDb.getSettings();
-  const apiKey = settings.apiKey || process.env.GEMINI_API_KEY;
+  const apiKey = settings.apiKey || process.env.LLM_API_KEY || process.env.GEMINI_API_KEY;
 
-  if (!apiKey || apiKey === 'MY_GEMINI_API_KEY') {
-    throw new Error('大模型 API Key 未配置！请在管理员后台进行设置（支持官规/中转）。');
+  if (!apiKey || apiKey === 'MY_LLM_API_KEY') {
+    throw new Error('LLM API key is not configured. Please set it in the admin panel.');
   }
 
-  const modelName = modelOverride || settings.model || 'gemini-3.1-flash-lite';
+  const modelName = modelOverride || settings.model || DEFAULT_LLM_MODEL;
   const baseUrl = settings.baseUrl ? settings.baseUrl.trim() : '';
+  const endpointPath = settings.endpointPath || DEFAULT_LLM_ENDPOINT_PATH;
 
   if (baseUrl) {
     // OpenAI-compatible middleware for custom proxies or models (e.g. GRS, DeepSeek, OpenRouter)
-    let endpoint = baseUrl;
-    if (!endpoint.endsWith('/chat/completions')) {
-      if (endpoint.endsWith('/')) {
-        endpoint += 'chat/completions';
-      } else if (endpoint.endsWith('/v1')) {
-        endpoint += '/chat/completions';
-      } else {
-        endpoint += '/v1/chat/completions';
-      }
-    }
+    const endpoint = buildEndpointUrl(baseUrl, endpointPath);
 
     console.log(`[LLM Custom API Proxy] Endpoint: ${endpoint}, model: ${modelName}`);
     const response = await fetch(endpoint, {
@@ -93,54 +100,48 @@ async function generateLLMResponse(systemInstruction: string, prompt: string, mo
 
 // 1. Unified Backend Settings API
 app.get('/api/config', (req, res) => {
-  const isEnvSet = !!process.env.GEMINI_API_KEY && process.env.GEMINI_API_KEY !== 'MY_GEMINI_API_KEY';
+  const envApiKey = process.env.LLM_API_KEY || process.env.GEMINI_API_KEY || '';
+  const isEnvSet = !!envApiKey && envApiKey !== 'MY_LLM_API_KEY';
   const settings = serverDb.getSettings();
   res.json({
     hasKey: !!settings.apiKey || isEnvSet,
     apiKey: settings.apiKey,
     baseUrl: settings.baseUrl,
+    endpointPath: settings.endpointPath,
     model: settings.model,
     source: settings.apiKey ? 'custom' : (isEnvSet ? 'env' : 'none')
   });
 });
 
 app.post('/api/config', (req, res) => {
-  const { apiKey, baseUrl, model } = req.body;
-  serverDb.saveSettings(apiKey, baseUrl, model);
+  const { apiKey, baseUrl, endpointPath, model } = req.body;
+  serverDb.saveSettings(apiKey, baseUrl, endpointPath, model);
   res.json({ success: true, message: '大模型适配与密钥参数更新成功！已持久保存于系统库中。' });
 });
 
 // Proxy route to process client-side chat completions securely utilizing backend environment or stored keys
 app.post('/api/chat', async (req, res) => {
   try {
-    const { systemInstruction, prompt, history, model, baseUrl, apiKey } = req.body;
+    const { systemInstruction, prompt, history, model, baseUrl, endpointPath, apiKey } = req.body;
 
     const settings = serverDb.getSettings();
-    let finalApiKey = (apiKey || settings.apiKey || process.env.GEMINI_API_KEY || '').trim();
+    let finalApiKey = (apiKey || settings.apiKey || process.env.LLM_API_KEY || process.env.GEMINI_API_KEY || '').trim();
 
     // Clean quotes or spaces in case of environment load artifacts
     finalApiKey = finalApiKey.replace(/^["']|["']$/g, '').trim();
 
-    if (!finalApiKey || finalApiKey === 'MY_GEMINI_API_KEY' || finalApiKey === 'YOUR_API_KEY' || finalApiKey === 'MY_API_KEY') {
-      res.status(400).json({ error: '未检测到 API 密钥。请点击页面右上角【适配参数配置 ⚙】并在弹窗内输入您的 Gemini / OpenAI API Key。' });
+    if (!finalApiKey || finalApiKey === 'MY_LLM_API_KEY' || finalApiKey === 'YOUR_API_KEY' || finalApiKey === 'MY_API_KEY') {
+      res.status(400).json({ error: '未检测到 API Key。请在配置中填写 API Key、BaseURL、ENDPOINT_PATH 和 Model。' });
       return;
     }
 
     const finalBaseUrl = baseUrl !== undefined ? baseUrl : (settings.baseUrl || '');
-    const finalModelName = model || settings.model || 'gemini-3.1-flash-lite';
+    const finalEndpointPath = endpointPath || settings.endpointPath || DEFAULT_LLM_ENDPOINT_PATH;
+    const finalModelName = model || settings.model || DEFAULT_LLM_MODEL;
 
     if (finalBaseUrl) {
       // Direct OpenAI-compatible calling
-      let endpoint = finalBaseUrl;
-      if (!endpoint.endsWith('/chat/completions')) {
-        if (endpoint.endsWith('/')) {
-          endpoint += 'chat/completions';
-        } else if (endpoint.endsWith('/v1')) {
-          endpoint += '/chat/completions';
-        } else {
-          endpoint += '/v1/chat/completions';
-        }
-      }
+      const endpoint = buildEndpointUrl(finalBaseUrl, finalEndpointPath);
 
       const messages: any[] = [{ role: 'system', content: systemInstruction }];
       if (history && history.length > 0) {
@@ -282,7 +283,7 @@ app.post('/api/rooms/generate-agent', async (req, res) => {
       return;
     }
 
-    const systemPrompt = `你是一个人工智能专家，请为“龙门阵”聊天室设计一个专门负责协调多方、引导控场且具有独特个性的“主持人Agent”的系统提示词（System Instruction）。
+    const systemPrompt = `你是一个人工智能专家，请为“碳硅茶馆”聊天室设计一个专门负责协调多方、引导控场且具有独特个性的“主持人Agent”的系统提示词（System Instruction）。
 聊天室信息如下：
 - 话题名称：${name}
 - 话题内容/背景：${description}
@@ -410,7 +411,7 @@ app.get('/api/rooms/:id/summary', (req, res) => {
     return;
   }
   res.setHeader('Content-Type', 'text/html');
-  res.setHeader('Content-Disposition', `attachment; filename=long_men_zhen_${req.params.id}_summary.html`);
+  res.setHeader('Content-Disposition', `attachment; filename=carbon_silicon_teahouse_${req.params.id}_summary.html`);
   res.send(room.summaryHtml);
 });
 
@@ -558,7 +559,7 @@ async function handleEndRoomDialogue(roomId: string, creatorId: string) {
       .map(m => `[时间: ${new Date(m.timestamp).toLocaleTimeString()} - 发言人: ${m.username} (角色: ${m.role})]: ${m.text}`)
       .join('\n\n');
 
-    const summaryPrompt = `你是一个专业的资深会议主持、话题论证和文字总结专家。现在“龙门阵”聊天室的讨论已结束，请为参与者生成一份极具含金量、排版精美、格式规范的 HTML 会议讨论深度总结。
+    const summaryPrompt = `你是一个专业的资深会议主持、话题论证和文字总结专家。现在“碳硅茶馆”聊天室的讨论已结束，请为参与者生成一份极具含金量、排版精美、格式规范的 HTML 会议讨论深度总结。
 
 [聊天室基本参数]
 - 主题：${room.name}
@@ -577,7 +578,7 @@ ${textTranscript}
 3. 字体选用优美的无衬线字体（如 System-ui, Inter, sans-serif），对于代码、元数据、技术细节或旁白点评使用等宽字体（如 JetBrains Mono, SFMono-Regular, monospace）。
 4. 页面主体需要高度可读，模块分明，设计合理的内边距（padding: 1.5rem）以及充足的外留白（负空间），展现极其高雅的极简设计。
 5. 包含以下核心版块：
-   - 【龙门阵·终局总结】标题与话题核心元数据（参与人数、发起时间等，置于精美的黑线网格中）
+   - 【Carbon-Silicon Teahouse · Final Summary】标题与话题核心元数据（参与人数、发起时间等，置于精美的黑线网格中）
    - 【原定目标 vs 讨论达成度评估】对比评估原定 ${room.expectedOutcome} 目标在本轮讨论中的最终实现程度。
    - 【观点对垒与交锋纪实】分析各参与者的视角、争论分歧点及最终达成的最大公约数。
    - 【AI 主持点评】讨论的主持人（${room.agentNickname}）对本场讨论风气、深度、论证逻辑的主题点评。
@@ -608,7 +609,7 @@ ${textTranscript}
       <html>
       <head>
         <meta charset="utf-8">
-        <title>龙门阵 · 讨论终局</title>
+        <title>Carbon-Silicon Teahouse · Final Summary</title>
         <style>
           body { font-family: monospace; padding: 2rem; background: #fff; color: #000; text-align: center; }
           .box { border: 2px solid #000; padding: 2rem; display: inline-block; max-width: 500px; text-align: left; }
@@ -617,7 +618,7 @@ ${textTranscript}
       </head>
       <body>
         <div class="box">
-          <h2>龙门阵已散</h2>
+          <h2>Carbon-Silicon Teahouse</h2>
           <p>房间主题：${room?.name || '未知主题'}</p>
           <p>本次讨论已经正式结束，您的会场讨论彻底清空已保障隐私。</p>
           <p style="color: red;">[自动总结生成异常]: ${error.message || '未知大模型异常'}</p>
@@ -685,7 +686,7 @@ wss.on('connection', (ws: WebSocket) => {
         }));
 
         // Send join system message
-        const sysMsg = makeSystemMessage(roomId, `${nickname || '成员'} 加入了龙门阵。`);
+        const sysMsg = makeSystemMessage(roomId, `${nickname || 'Member'} joined the Carbon-Silicon Teahouse.`);
         serverDb.saveMessage(roomId, sysMsg);
         broadcastToRoom(roomId, { type: 'message', message: sysMsg });
         broadcastToRoom(roomId, { type: 'participants:update', participants: Object.values(activeParticipants[roomId]) });
@@ -797,7 +798,7 @@ wss.on('connection', (ws: WebSocket) => {
         delete activeParticipants[roomId][userId];
         
         // Send system leave message
-        const sysMsg = makeSystemMessage(roomId, `${participant.nickname} 退出了龙门阵。`);
+        const sysMsg = makeSystemMessage(roomId, `${participant.nickname} left the Carbon-Silicon Teahouse.`);
         serverDb.saveMessage(roomId, sysMsg);
         broadcastToRoom(roomId, { type: 'message', message: sysMsg });
         broadcastToRoom(roomId, { type: 'participants:update', participants: Object.values(activeParticipants[roomId]) });

@@ -1,36 +1,55 @@
 // Client-side LLM calling and settings persistence layer
 // Resolves Cloudflare Pages Node-server DB and socket limits by doing direct in-browser REST API requests securely.
+import { DEFAULT_LLM_BASE_URL, DEFAULT_LLM_ENDPOINT_PATH, DEFAULT_LLM_MODEL, STORAGE_KEYS } from './constants';
 
 export interface LLMConfig {
   apiKey: string;
   baseUrl: string;
+  endpointPath: string;
   model: string;
 }
 
 const DEFAULT_CONFIG: LLMConfig = {
   apiKey: '',
-  baseUrl: 'https://api.grsai.com/v1',
-  model: 'gemini-3.1-flash-lite'
+  baseUrl: DEFAULT_LLM_BASE_URL,
+  endpointPath: DEFAULT_LLM_ENDPOINT_PATH,
+  model: DEFAULT_LLM_MODEL
 };
+
+function normalizeEndpointPath(path: string): string {
+  const trimmed = (path || DEFAULT_LLM_ENDPOINT_PATH).trim().replace(/^["']|["']$/g, '').trim();
+  if (!trimmed) return DEFAULT_LLM_ENDPOINT_PATH;
+  return trimmed.startsWith('/') ? trimmed : `/${trimmed}`;
+}
+
+function buildEndpointUrl(baseUrl: string, endpointPath: string): string {
+  const base = (baseUrl || '').trim().replace(/\/+$/, '');
+  const path = normalizeEndpointPath(endpointPath);
+  if (!base) return path;
+  if (base.endsWith(path)) return base;
+  return `${base}${path}`;
+}
 
 // 1. Get configuration
 export function getLLMConfig(): LLMConfig {
   const defaultKey = '';
-  const defaultBase = 'https://api.grsai.com/v1';
-  const defaultModel = 'gemini-3.1-flash-lite';
+  const defaultBase = DEFAULT_LLM_BASE_URL;
+  const defaultModel = DEFAULT_LLM_MODEL;
 
-  const localKey = localStorage.getItem('longmenzhen_apiKey') || '';
-  const localBase = localStorage.getItem('longmenzhen_baseUrl') || '';
-  const localModel = localStorage.getItem('longmenzhen_model') || '';
+  const localKey = localStorage.getItem(STORAGE_KEYS.apiKey) || '';
+  const localBase = localStorage.getItem(STORAGE_KEYS.baseUrl) || '';
+  const localEndpointPath = localStorage.getItem(STORAGE_KEYS.endpointPath) || '';
+  const localModel = localStorage.getItem(STORAGE_KEYS.model) || '';
 
   // Fallbacks to package build variables if any
-  const envKey = (import.meta as any).env.VITE_GEMINI_API_KEY || (import.meta as any).env.VITE_API_KEY || '';
-  const envBase = (import.meta as any).env.VITE_GEMINI_BASE_URL || '';
+  const envKey = (import.meta as any).env.VITE_LLM_API_KEY || (import.meta as any).env.VITE_API_KEY || '';
+  const envBase = (import.meta as any).env.VITE_LLM_BASE_URL || '';
+  const envEndpointPath = (import.meta as any).env.VITE_LLM_ENDPOINT_PATH || '';
   const envModel = (import.meta as any).env.VITE_LLM_MODEL || '';
 
   let finalKey = (localKey || envKey || defaultKey).trim();
   finalKey = finalKey.replace(/^["']|["']$/g, '').trim();
-  if (finalKey === 'MY_GEMINI_API_KEY' || finalKey === 'YOUR_API_KEY' || finalKey === 'MY_API_KEY') {
+  if (finalKey === 'MY_LLM_API_KEY' || finalKey === 'YOUR_API_KEY' || finalKey === 'MY_API_KEY') {
     finalKey = '';
   }
 
@@ -39,11 +58,13 @@ export function getLLMConfig(): LLMConfig {
     finalBase = finalBase.trim().replace(/^["']|["']$/g, '').trim();
   }
   
+  const finalEndpointPath = normalizeEndpointPath(localEndpointPath || envEndpointPath || DEFAULT_LLM_ENDPOINT_PATH);
   let finalModel = (localModel || envModel || defaultModel).trim().replace(/^["']|["']$/g, '').trim();
 
   return {
     apiKey: finalKey,
     baseUrl: finalBase,
+    endpointPath: finalEndpointPath,
     model: finalModel
   };
 }
@@ -51,17 +72,17 @@ export function getLLMConfig(): LLMConfig {
 // 1.5 Fetch available model list from OpenAI-compatible /v1/models endpoint
 export async function fetchAvailableModels(apiKey: string, baseUrl: string): Promise<string[]> {
   if (!apiKey) return [];
-  
+
   const trimmedKey = apiKey.trim();
   const trimmedBase = baseUrl.trim();
 
-  // If baseUrl is empty, it's official Google Gemini direct
+    // If baseUrl is empty, return a small set of common model names for quick picking
   if (!trimmedBase) {
     return [
-      'gemini-3.1-flash-lite',
-      'gemini-2.5-flash',
-      'gemini-1.5-flash',
-      'gemini-1.5-pro'
+      'gpt-4o-mini',
+      'gpt-4.1-mini',
+      'claude-3-5-sonnet-20241022',
+      'gemini-2.5-flash'
     ];
   }
 
@@ -95,12 +116,12 @@ export async function fetchAvailableModels(apiKey: string, baseUrl: string): Pro
         .map((m: any) => typeof m === 'string' ? m : m.id)
         .filter(Boolean) as string[];
       
-      // Sort so gemini-3.1-flash-lite is at top if present, otherwise alphabetical
+      // Sort common short-form models to the top, otherwise alphabetical
       modelCodes.sort((a, b) => {
-        if (a.includes('gemini-3.1-flash-lite')) return -1;
-        if (b.includes('gemini-3.1-flash-lite')) return 1;
-        if (a.includes('flash-lite')) return -1;
-        if (b.includes('flash-lite')) return 1;
+        if (a.includes('gpt-4o-mini')) return -1;
+        if (b.includes('gpt-4o-mini')) return 1;
+        if (a.includes('mini')) return -1;
+        if (b.includes('mini')) return 1;
         return a.localeCompare(b);
       });
 
@@ -115,16 +136,18 @@ export async function fetchAvailableModels(apiKey: string, baseUrl: string): Pro
 
 // 2. Save configuration
 export function saveLLMConfig(config: Partial<LLMConfig>) {
-  if (config.apiKey !== undefined) localStorage.setItem('longmenzhen_apiKey', config.apiKey);
-  if (config.baseUrl !== undefined) localStorage.setItem('longmenzhen_baseUrl', config.baseUrl);
-  if (config.model !== undefined) localStorage.setItem('longmenzhen_model', config.model);
+  if (config.apiKey !== undefined) localStorage.setItem(STORAGE_KEYS.apiKey, config.apiKey);
+  if (config.baseUrl !== undefined) localStorage.setItem(STORAGE_KEYS.baseUrl, config.baseUrl);
+  if (config.endpointPath !== undefined) localStorage.setItem(STORAGE_KEYS.endpointPath, normalizeEndpointPath(config.endpointPath));
+  if (config.model !== undefined) localStorage.setItem(STORAGE_KEYS.model, config.model);
 }
 
 // 3. Clear configuration
 export function clearLLMConfig() {
-  localStorage.removeItem('longmenzhen_apiKey');
-  localStorage.removeItem('longmenzhen_baseUrl');
-  localStorage.removeItem('longmenzhen_model');
+  localStorage.removeItem(STORAGE_KEYS.apiKey);
+  localStorage.removeItem(STORAGE_KEYS.baseUrl);
+  localStorage.removeItem(STORAGE_KEYS.endpointPath);
+  localStorage.removeItem(STORAGE_KEYS.model);
 }
 
 // 3.5 Context Compression Config Management & Optimization
@@ -136,10 +159,10 @@ export interface CompressionConfig {
 }
 
 export function getCompressionConfig(): CompressionConfig {
-  const localTurns = localStorage.getItem('longmenzhen_compress_maxTurns');
-  const localHtml = localStorage.getItem('longmenzhen_compress_html');
-  const localLongText = localStorage.getItem('longmenzhen_compress_longText');
-  const localCharLimit = localStorage.getItem('longmenzhen_compress_charLimit');
+  const localTurns = localStorage.getItem(STORAGE_KEYS.compressionMaxTurns);
+  const localHtml = localStorage.getItem(STORAGE_KEYS.compressionHtml);
+  const localLongText = localStorage.getItem(STORAGE_KEYS.compressionLongText);
+  const localCharLimit = localStorage.getItem(STORAGE_KEYS.compressionCharLimit);
 
   return {
     maxTurns: localTurns ? parseInt(localTurns, 10) : 8,
@@ -150,10 +173,10 @@ export function getCompressionConfig(): CompressionConfig {
 }
 
 export function saveCompressionConfig(config: Partial<CompressionConfig>) {
-  if (config.maxTurns !== undefined) localStorage.setItem('longmenzhen_compress_maxTurns', config.maxTurns.toString());
-  if (config.compressHtml !== undefined) localStorage.setItem('longmenzhen_compress_html', config.compressHtml ? 'true' : 'false');
-  if (config.compressLongText !== undefined) localStorage.setItem('longmenzhen_compress_longText', config.compressLongText ? 'true' : 'false');
-  if (config.maxCharLimit !== undefined) localStorage.setItem('longmenzhen_compress_charLimit', config.maxCharLimit.toString());
+  if (config.maxTurns !== undefined) localStorage.setItem(STORAGE_KEYS.compressionMaxTurns, config.maxTurns.toString());
+  if (config.compressHtml !== undefined) localStorage.setItem(STORAGE_KEYS.compressionHtml, config.compressHtml ? 'true' : 'false');
+  if (config.compressLongText !== undefined) localStorage.setItem(STORAGE_KEYS.compressionLongText, config.compressLongText ? 'true' : 'false');
+  if (config.maxCharLimit !== undefined) localStorage.setItem(STORAGE_KEYS.compressionCharLimit, config.maxCharLimit.toString());
 }
 
 /**
@@ -182,7 +205,7 @@ export function compressHistoryContext(
         const rawLen = innerCode.length;
         if (rawLen > 120) {
           const rawExcerpt = innerCode.trim().substring(0, 100).replace(/\s+/g, ' ');
-          return `\n\`\`\`html\n<!-- [龙门阵Token精简机制]: 历史网页设计源码已智能折叠(原长 ${rawLen} 字) 摘要: ${rawExcerpt}... -->\n\`\`\`\n`;
+          return `\n\`\`\`html\n<!-- [Carbon-Silicon Teahouse Token Compression]: history HTML collapsed (original length ${rawLen} chars). Summary: ${rawExcerpt}... -->\n\`\`\`\n`;
         }
         return match;
       });
@@ -193,7 +216,7 @@ export function compressHistoryContext(
       const head = content.substring(0, config.maxCharLimit - 70);
       const tail = content.substring(content.length - 50);
       const reducedCount = content.length - head.length - tail.length;
-      content = `${head}\n\n[...🍵 龙门阵Token省电技术已自动压缩 ${reducedCount} 字历史过招论点 ...]\n\n${tail}`;
+      content = `${head}\n\n[... Carbon-Silicon Teahouse context trimmed automatically by ${reducedCount} chars ...]\n\n${tail}`;
     }
 
     return {
@@ -211,8 +234,9 @@ export async function generateClientLLMResponse(
 ): Promise<string> {
   const config = getLLMConfig();
   const apiKey = config.apiKey;
-  const model = config.model || 'gemini-3.1-flash-lite';
+  const model = config.model || DEFAULT_LLM_MODEL;
   const baseUrl = config.baseUrl ? config.baseUrl.trim() : '';
+  const endpointPath = config.endpointPath || DEFAULT_LLM_ENDPOINT_PATH;
 
   // Apply context token saving optimization prior to execution
   let finalHistory = history;
@@ -224,8 +248,8 @@ export async function generateClientLLMResponse(
     
     const savedCount = origCharCount - compCharCount;
     if (savedCount > 0) {
-      const globalSaved = parseInt(localStorage.getItem('longmenzhen_total_chars_saved') || '0', 10);
-      localStorage.setItem('longmenzhen_total_chars_saved', (globalSaved + savedCount).toString());
+      const globalSaved = parseInt(localStorage.getItem(STORAGE_KEYS.totalCharsSaved) || '0', 10);
+      localStorage.setItem(STORAGE_KEYS.totalCharsSaved, (globalSaved + savedCount).toString());
     }
   }
 
@@ -242,6 +266,7 @@ export async function generateClientLLMResponse(
         history: finalHistory,
         model,
         baseUrl,
+        endpointPath,
         apiKey
       })
     });
@@ -261,26 +286,17 @@ export async function generateClientLLMResponse(
   } catch (backendErr: any) {
     console.warn('[LLM Service] Backend chat proxy failed, trying browser direct request:', backendErr);
     if (!apiKey) {
-      throw new Error(backendErr.message || '未检测到 API 密钥。请点击页面右上角【适配参数配置 ⚙】并在弹窗内输入您的 Gemini / OpenAI API Key。');
+      throw new Error(backendErr.message || '未检测到 API Key。请在配置中填写 API Key、BaseURL、ENDPOINT_PATH 和 Model。');
     }
   }
 
   if (!apiKey) {
-    throw new Error('未检测到 API 密钥。请点击页面右上角【适配参数配置 ⚙】并在弹窗内输入您的 Gemini / OpenAI API Key。');
+    throw new Error('未检测到 API Key。请在配置中填写 API Key、BaseURL、ENDPOINT_PATH 和 Model。');
   }
 
   // Case A: Custom OpenAI-compatible proxy (e.g. GRS, DeepSeek, OpenRouter, self-host proxy, etc.)
   if (baseUrl) {
-    let endpoint = baseUrl;
-    if (!endpoint.endsWith('/chat/completions')) {
-      if (endpoint.endsWith('/')) {
-        endpoint += 'chat/completions';
-      } else if (endpoint.endsWith('/v1')) {
-        endpoint += '/chat/completions';
-      } else {
-        endpoint += '/v1/chat/completions';
-      }
-    }
+    const endpoint = buildEndpointUrl(baseUrl, endpointPath);
 
     console.log(`[Client LLM Proxy] Path: ${endpoint}, model: ${model}`);
 
@@ -385,7 +401,7 @@ export async function generateClientCustomPrompt(params: {
   const { name, description, nature, expectedOutcome, agentNickname } = params;
 
   const systemInstruction = "你是一个卓越的系统角色规划师和提示词专家。";
-  const userPrompt = `你是一个人工智能专家，请为“龙门阵”设计的“AI Agent讨论话事官”设计一个具有独特个性的系统指令（System Instruction）。
+  const userPrompt = `你是一个人工智能专家，请为“碳硅茶馆”设计的“AI Agent discussion host”设计一个具有独特个性的系统指令（System Instruction）。
 设计要素如下：
 - 扮演配角名号/昵称：${agentNickname}
 - 核心讨论议题/背景：${description}
@@ -412,7 +428,7 @@ export async function generateClientSummaryHtml(params: {
 }): Promise<string> {
   const { agentName, topicName, historyText, outcomeTarget } = params;
   const sys = `你是一个专业的资深会议主持、话题论证和文字总结专家。请为参与者生成一份极具含金量、排版精美、格式规范的 HTML 会议讨论结案终局报告。`;
-  const prompt = `这里有一段用户与 AI Agent “${agentName}” 围绕 “${topicName}” 进行的龙门阵讨论记录：
+  const prompt = `这里有一段用户与 AI Agent “${agentName}” 围绕 “${topicName}” 进行的碳硅茶馆讨论记录：
 ${historyText}
 
 请为此设计并生成一份带有排版美学的终局总结 HTML，预期成果方向为：${outcomeTarget}。
@@ -423,7 +439,7 @@ ${historyText}
 3. 结构清晰，包含【对决/讨论主题】、【核心成果纲要】、【关键论点交锋记录】、【行动改善建议】等模块。
 4. 将原本口语化的聊天汇总提炼，提炼出 3 条具有极强穿透力和落地性的核心干货结论。
 5. 包含一节“主讲主持 AI 点评”，总结本场讨论。
-6. 最下方展示：“龙门阵结案盖印。阅后即散，服务器内存已彻底销毁，江湖再会。”
+6. 最下方展示：“Carbon-Silicon Teahouse case closed. The session is cleared and the memory is released.”
 7. **重要：绝对不要使用 markdown 标记 (\`\`\`html) 进行包裹，直接输出完整的 html 文本代码。**`;
 
   return generateClientLLMResponse(sys, prompt);
