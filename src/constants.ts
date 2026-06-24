@@ -2,15 +2,12 @@ export const APP_NAME = '碳硅茶馆';
 export const APP_NAME_EN = 'Carbon-Silicon Teahouse';
 export const APP_COPYRIGHT = 'Copyright © 2026 ScmEaic. All rights reserved.';
 
-export const DEFAULT_LLM_BASE_URL = 'https://api.openai.com/v1';
-export const DEFAULT_LLM_ENDPOINT_PATH = '/chat/completions';
-export const DEFAULT_LLM_MODEL = 'gpt-4o-mini';
-
 export const STORAGE_KEYS = {
   apiKey: 'cs_teahouse_api_key',
   baseUrl: 'cs_teahouse_base_url',
   endpointPath: 'cs_teahouse_endpoint_path',
   model: 'cs_teahouse_model',
+  configMigration: 'cs_teahouse_config_migration',
   language: 'cs_teahouse_language',
   nickname: 'cs_teahouse_user_nickname',
   customAgents: (teahouseId: string) => `cs_teahouse_custom_agents_${teahouseId}`,

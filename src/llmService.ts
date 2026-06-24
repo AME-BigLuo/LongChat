@@ -1,6 +1,6 @@
 // Client-side LLM calling and settings persistence layer
 // Resolves Cloudflare Pages Node-server DB and socket limits by doing direct in-browser REST API requests securely.
-import { DEFAULT_LLM_BASE_URL, DEFAULT_LLM_ENDPOINT_PATH, DEFAULT_LLM_MODEL, STORAGE_KEYS } from './constants';
+import { STORAGE_KEYS } from './constants';
 
 export interface LLMConfig {
   apiKey: string;
@@ -11,20 +11,25 @@ export interface LLMConfig {
 
 const DEFAULT_CONFIG: LLMConfig = {
   apiKey: '',
-  baseUrl: DEFAULT_LLM_BASE_URL,
-  endpointPath: DEFAULT_LLM_ENDPOINT_PATH,
-  model: DEFAULT_LLM_MODEL
+  baseUrl: '',
+  endpointPath: '',
+  model: ''
 };
 
+const OPENAI_CHAT_COMPLETIONS_PATH = '/chat/completions';
+const STALE_AUTOFILL_BASE_URL = 'https://api.openai.com/v1';
+const STALE_AUTOFILL_MODEL = 'gpt-4o-mini';
+const STALE_AUTOFILL_MIGRATION = 'stale_autofill_cleared_v1';
+
 function normalizeEndpointPath(path: string): string {
-  const trimmed = (path || DEFAULT_LLM_ENDPOINT_PATH).trim().replace(/^["']|["']$/g, '').trim();
-  if (!trimmed) return DEFAULT_LLM_ENDPOINT_PATH;
+  const trimmed = (path || '').trim().replace(/^["']|["']$/g, '').trim();
+  if (!trimmed) return '';
   return trimmed.startsWith('/') ? trimmed : `/${trimmed}`;
 }
 
 function buildEndpointUrl(baseUrl: string, endpointPath: string): string {
   const base = (baseUrl || '').trim().replace(/\/+$/, '');
-  const path = normalizeEndpointPath(endpointPath);
+  const path = normalizeEndpointPath(endpointPath) || OPENAI_CHAT_COMPLETIONS_PATH;
   if (!base) return path;
   if (base.endsWith(path)) return base;
   return `${base}${path}`;
@@ -33,9 +38,6 @@ function buildEndpointUrl(baseUrl: string, endpointPath: string): string {
 // 1. Get configuration
 export function getLLMConfig(): LLMConfig {
   const defaultKey = '';
-  const defaultBase = DEFAULT_LLM_BASE_URL;
-  const defaultModel = DEFAULT_LLM_MODEL;
-
   const localKey = localStorage.getItem(STORAGE_KEYS.apiKey) || '';
   const localBase = localStorage.getItem(STORAGE_KEYS.baseUrl) || '';
   const localEndpointPath = localStorage.getItem(STORAGE_KEYS.endpointPath) || '';
@@ -53,13 +55,32 @@ export function getLLMConfig(): LLMConfig {
     finalKey = '';
   }
 
-  let finalBase = localBase !== null && localBase !== undefined ? localBase : (envBase || defaultBase);
+  const migrationDone = localStorage.getItem(STORAGE_KEYS.configMigration) === STALE_AUTOFILL_MIGRATION;
+  const shouldClearStaleAutofill = !migrationDone
+    && localBase.trim() === STALE_AUTOFILL_BASE_URL
+    && normalizeEndpointPath(localEndpointPath) === OPENAI_CHAT_COMPLETIONS_PATH
+    && localModel.trim() === STALE_AUTOFILL_MODEL;
+
+  if (!migrationDone) {
+    if (shouldClearStaleAutofill) {
+      localStorage.removeItem(STORAGE_KEYS.baseUrl);
+      localStorage.removeItem(STORAGE_KEYS.endpointPath);
+      localStorage.removeItem(STORAGE_KEYS.model);
+    }
+    localStorage.setItem(STORAGE_KEYS.configMigration, STALE_AUTOFILL_MIGRATION);
+  }
+
+  const cleanedLocalBase = shouldClearStaleAutofill ? '' : localBase;
+  const cleanedLocalEndpointPath = shouldClearStaleAutofill ? '' : localEndpointPath;
+  const cleanedLocalModel = shouldClearStaleAutofill ? '' : localModel;
+
+  let finalBase = cleanedLocalBase || envBase || '';
   if (finalBase) {
     finalBase = finalBase.trim().replace(/^["']|["']$/g, '').trim();
   }
   
-  const finalEndpointPath = normalizeEndpointPath(localEndpointPath || envEndpointPath || DEFAULT_LLM_ENDPOINT_PATH);
-  let finalModel = (localModel || envModel || defaultModel).trim().replace(/^["']|["']$/g, '').trim();
+  const finalEndpointPath = normalizeEndpointPath(cleanedLocalEndpointPath || envEndpointPath);
+  let finalModel = (cleanedLocalModel || envModel || '').trim().replace(/^["']|["']$/g, '').trim();
 
   return {
     apiKey: finalKey,
@@ -76,14 +97,8 @@ export async function fetchAvailableModels(apiKey: string, baseUrl: string): Pro
   const trimmedKey = apiKey.trim();
   const trimmedBase = baseUrl.trim();
 
-    // If baseUrl is empty, return a small set of common model names for quick picking
   if (!trimmedBase) {
-    return [
-      'gpt-4o-mini',
-      'gpt-4.1-mini',
-      'claude-3-5-sonnet-20241022',
-      'gemini-2.5-flash'
-    ];
+    throw new Error('请先填写 BaseURL。');
   }
 
   // Construct target models endpoint
@@ -116,10 +131,8 @@ export async function fetchAvailableModels(apiKey: string, baseUrl: string): Pro
         .map((m: any) => typeof m === 'string' ? m : m.id)
         .filter(Boolean) as string[];
       
-      // Sort common short-form models to the top, otherwise alphabetical
+      // Keep provider-returned models easy to scan without baking in a default model.
       modelCodes.sort((a, b) => {
-        if (a.includes('gpt-4o-mini')) return -1;
-        if (b.includes('gpt-4o-mini')) return 1;
         if (a.includes('mini')) return -1;
         if (b.includes('mini')) return 1;
         return a.localeCompare(b);
@@ -234,9 +247,9 @@ export async function generateClientLLMResponse(
 ): Promise<string> {
   const config = getLLMConfig();
   const apiKey = config.apiKey;
-  const model = config.model || DEFAULT_LLM_MODEL;
+  const model = config.model;
   const baseUrl = config.baseUrl ? config.baseUrl.trim() : '';
-  const endpointPath = config.endpointPath || DEFAULT_LLM_ENDPOINT_PATH;
+  const endpointPath = config.endpointPath;
 
   // Apply context token saving optimization prior to execution
   let finalHistory = history;
@@ -292,6 +305,10 @@ export async function generateClientLLMResponse(
 
   if (!apiKey) {
     throw new Error('未检测到 API Key。请在配置中填写 API Key、BaseURL、ENDPOINT_PATH 和 Model。');
+  }
+
+  if (!model) {
+    throw new Error('未检测到 Model。请在配置中填写 API Key、BaseURL、ENDPOINT_PATH 和 Model。');
   }
 
   // Case A: Custom OpenAI-compatible proxy (e.g. GRS, DeepSeek, OpenRouter, self-host proxy, etc.)

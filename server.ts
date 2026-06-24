@@ -10,7 +10,7 @@ dotenv.config();
 import { GoogleGenAI } from '@google/genai';
 import { Room, RoomSession, Message, Participant } from './src/types';
 import { serverDb } from './server-db';
-import { DEFAULT_LLM_ENDPOINT_PATH, DEFAULT_LLM_MODEL, APP_NAME } from './src/constants';
+const OPENAI_COMPATIBLE_CHAT_PATH = '/chat/completions';
 
 const app = express();
 const PORT = 3001;
@@ -18,14 +18,14 @@ const PORT = 3001;
 app.use(express.json());
 
 function normalizeEndpointPath(pathValue?: string): string {
-  const trimmed = (pathValue || DEFAULT_LLM_ENDPOINT_PATH).trim().replace(/^["']|["']$/g, '').trim();
-  if (!trimmed) return DEFAULT_LLM_ENDPOINT_PATH;
+  const trimmed = (pathValue || '').trim().replace(/^["']|["']$/g, '').trim();
+  if (!trimmed) return '';
   return trimmed.startsWith('/') ? trimmed : `/${trimmed}`;
 }
 
 function buildEndpointUrl(baseUrl: string, endpointPath?: string): string {
   const base = (baseUrl || '').trim().replace(/\/+$/, '');
-  const pathValue = normalizeEndpointPath(endpointPath);
+  const pathValue = normalizeEndpointPath(endpointPath) || OPENAI_COMPATIBLE_CHAT_PATH;
   if (!base) return pathValue;
   if (base.endsWith(pathValue)) return base;
   return `${base}${pathValue}`;
@@ -40,9 +40,13 @@ async function generateLLMResponse(systemInstruction: string, prompt: string, mo
     throw new Error('LLM API key is not configured. Please set it in the admin panel.');
   }
 
-  const modelName = modelOverride || settings.model || DEFAULT_LLM_MODEL;
+  const modelName = modelOverride || settings.model;
   const baseUrl = settings.baseUrl ? settings.baseUrl.trim() : '';
-  const endpointPath = settings.endpointPath || DEFAULT_LLM_ENDPOINT_PATH;
+  const endpointPath = settings.endpointPath;
+
+  if (!modelName) {
+    throw new Error('LLM model is not configured. Please set Model in the admin panel.');
+  }
 
   if (baseUrl) {
     // OpenAI-compatible middleware for custom proxies or models (e.g. GRS, DeepSeek, OpenRouter)
@@ -136,8 +140,13 @@ app.post('/api/chat', async (req, res) => {
     }
 
     const finalBaseUrl = baseUrl !== undefined ? baseUrl : (settings.baseUrl || '');
-    const finalEndpointPath = endpointPath || settings.endpointPath || DEFAULT_LLM_ENDPOINT_PATH;
-    const finalModelName = model || settings.model || DEFAULT_LLM_MODEL;
+    const finalEndpointPath = endpointPath !== undefined ? endpointPath : settings.endpointPath;
+    const finalModelName = model || settings.model;
+
+    if (!finalModelName) {
+      res.status(400).json({ error: '未检测到 Model。请在配置中填写 API Key、BaseURL、ENDPOINT_PATH 和 Model。' });
+      return;
+    }
 
     if (finalBaseUrl) {
       // Direct OpenAI-compatible calling

@@ -1,7 +1,6 @@
 import fs from 'fs';
 import path from 'path';
 import { Room, RoomSession, Message, Participant } from './src/types';
-import { DEFAULT_LLM_ENDPOINT_PATH, DEFAULT_LLM_MODEL } from './src/constants';
 
 // Portable interface definitions
 export interface AdminAccount {
@@ -35,8 +34,8 @@ let memoryDb: DBStorage = {
   settings: {
     apiKey: '',
     baseUrl: '',
-    endpointPath: DEFAULT_LLM_ENDPOINT_PATH,
-    model: DEFAULT_LLM_MODEL
+    endpointPath: '',
+    model: ''
   },
   admins: {},
   rooms: {},
@@ -55,8 +54,9 @@ function loadDatabase(): DBStorage {
       const data = JSON.parse(content) as DBStorage;
       
       // Upgrade safety check
-      if (!data.settings) data.settings = { apiKey: '', baseUrl: '', endpointPath: DEFAULT_LLM_ENDPOINT_PATH, model: DEFAULT_LLM_MODEL };
-      if (!data.settings.endpointPath) data.settings.endpointPath = DEFAULT_LLM_ENDPOINT_PATH;
+      if (!data.settings) data.settings = { apiKey: '', baseUrl: '', endpointPath: '', model: '' };
+      if (!Object.prototype.hasOwnProperty.call(data.settings, 'endpointPath')) data.settings.endpointPath = '';
+      if (!Object.prototype.hasOwnProperty.call(data.settings, 'model')) data.settings.model = '';
       if (!data.admins) data.admins = {};
       if (!data.rooms) data.rooms = {};
       if (!data.messages) data.messages = {};
@@ -122,8 +122,8 @@ export const serverDb = {
     return {
       apiKey: memoryDb.settings.apiKey || envKey,
       baseUrl: memoryDb.settings.baseUrl || envBase || '',
-      endpointPath: memoryDb.settings.endpointPath || envEndpointPath || DEFAULT_LLM_ENDPOINT_PATH,
-      model: memoryDb.settings.model || envModel || DEFAULT_LLM_MODEL
+      endpointPath: memoryDb.settings.endpointPath || envEndpointPath || '',
+      model: memoryDb.settings.model || envModel || ''
     };
   },
 
@@ -132,7 +132,7 @@ export const serverDb = {
     if (baseUrl !== undefined) memoryDb.settings.baseUrl = baseUrl;
     if (endpointPath !== undefined) {
       const trimmedPath = endpointPath.trim();
-      memoryDb.settings.endpointPath = trimmedPath ? (trimmedPath.startsWith('/') ? trimmedPath : `/${trimmedPath}`) : DEFAULT_LLM_ENDPOINT_PATH;
+      memoryDb.settings.endpointPath = trimmedPath ? (trimmedPath.startsWith('/') ? trimmedPath : `/${trimmedPath}`) : '';
     }
     if (model !== undefined) memoryDb.settings.model = model;
     saveDatabase();

@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Key, Globe, Cpu, HelpCircle, Zap, Sliders, X, Route } from 'lucide-react';
 import { getLLMConfig, saveLLMConfig, fetchAvailableModels, getCompressionConfig, saveCompressionConfig } from '../llmService';
-import { DEFAULT_LLM_BASE_URL, DEFAULT_LLM_ENDPOINT_PATH, DEFAULT_LLM_MODEL } from '../constants';
 import { AppLanguage } from '../types';
 
 interface SettingsModalProps {
@@ -13,8 +12,8 @@ interface SettingsModalProps {
 export default function SettingsModal({ onClose, onConfigSaved, language }: SettingsModalProps) {
   const [apiKey, setApiKey] = useState('');
   const [baseUrl, setBaseUrl] = useState('');
-  const [endpointPath, setEndpointPath] = useState(DEFAULT_LLM_ENDPOINT_PATH);
-  const [model, setModel] = useState(DEFAULT_LLM_MODEL);
+  const [endpointPath, setEndpointPath] = useState('');
+  const [model, setModel] = useState('');
   const [saveSuccess, setSaveSuccess] = useState(false);
 
   const [fetchedModels, setFetchedModels] = useState<string[]>([]);
@@ -30,10 +29,9 @@ export default function SettingsModal({ onClose, onConfigSaved, language }: Sett
   useEffect(() => {
     const config = getLLMConfig();
     setApiKey(config.apiKey);
-    const base = config.baseUrl || DEFAULT_LLM_BASE_URL;
-    setBaseUrl(base);
-    setEndpointPath(config.endpointPath || DEFAULT_LLM_ENDPOINT_PATH);
-    setModel(config.model || DEFAULT_LLM_MODEL);
+    setBaseUrl(config.baseUrl);
+    setEndpointPath(config.endpointPath);
+    setModel(config.model);
 
     // Load custom context compression configuration
     const compConfig = getCompressionConfig();
@@ -56,8 +54,7 @@ export default function SettingsModal({ onClose, onConfigSaved, language }: Sett
       const modelsList = await fetchAvailableModels(apiKey, baseUrl);
       if (modelsList && modelsList.length > 0) {
         setFetchedModels(modelsList);
-        const preferred = modelsList.find(m => m.includes(DEFAULT_LLM_MODEL)) || modelsList[0];
-        setModel(preferred);
+        setModel(modelsList[0]);
       } else {
         throw new Error(language === 'zh' ? '接口返回的 Model 列表为空。' : 'The endpoint returned an empty model list.');
       }
@@ -109,7 +106,7 @@ export default function SettingsModal({ onClose, onConfigSaved, language }: Sett
             <span>{language === 'zh' ? '⚙ 配置' : '⚙ Configuration'}</span>
           </h2>
           <p className="text-[11px] text-neutral-500 font-mono mt-1">
-            {language === 'zh' ? '所有配置默认保存在你的浏览器本地。' : 'All settings stay in your browser unless you explicitly save them to the backend.'}
+            {language === 'zh' ? '所有配置会保存在你的浏览器本地。' : 'All settings stay in your browser unless you explicitly save them to the backend.'}
           </p>
         </div>
 
@@ -154,14 +151,14 @@ export default function SettingsModal({ onClose, onConfigSaved, language }: Sett
               </label>
               <input
                 type="text"
-                placeholder="https://api.openai.com/v1"
+                placeholder={language === 'zh' ? '请输入 BaseURL' : 'Enter BaseURL'}
                 value={baseUrl}
                 onChange={(e) => setBaseUrl(e.target.value)}
                 className="w-full border-2 border-black p-2 text-sm font-mono text-black focus:outline-none bg-white"
                 id="settings_base_url_input"
               />
               <p className="text-[10px] text-neutral-500 font-mono">
-                {language === 'zh' ? '* 例如 https://api.openai.com/v1。' : '* Example: https://api.openai.com/v1.'}
+                {language === 'zh' ? '* 例如：https://api.example.com/v1。' : '* Example: https://api.example.com/v1.'}
               </p>
             </div>
 
@@ -173,14 +170,14 @@ export default function SettingsModal({ onClose, onConfigSaved, language }: Sett
               </label>
               <input
                 type="text"
-                placeholder="/chat/completions"
+                placeholder={language === 'zh' ? '请输入 ENDPOINT_PATH' : 'Enter ENDPOINT_PATH'}
                 value={endpointPath}
                 onChange={(e) => setEndpointPath(e.target.value)}
                 className="w-full border-2 border-black p-2 text-sm font-mono text-black focus:outline-none bg-white"
                 id="settings_endpoint_path_input"
               />
               <p className="text-[10px] text-neutral-500 font-mono">
-                {language === 'zh' ? '* 默认 /chat/completions。' : '* Default: /chat/completions.'}
+                {language === 'zh' ? '* 请按你的服务商文档填写。' : '* Use the path required by your provider.'}
               </p>
             </div>
 
@@ -360,13 +357,13 @@ export default function SettingsModal({ onClose, onConfigSaved, language }: Sett
                 {language === 'zh' ? '此版本不会在仓库中内置密钥。请在本地填写自己的 API Key、BaseURL、ENDPOINT_PATH 和 Model。' : 'This build keeps secrets out of the repository. Enter your own API Key, BaseURL, ENDPOINT_PATH, and Model locally.'}
               </p>
               <p className="font-bold text-black pt-1">
-                {language === 'zh' ? '推荐环境变量：' : 'Recommended environment variables:'}
+                {language === 'zh' ? '可选环境变量：' : 'Optional environment variables:'}
               </p>
               <ul className="list-disc list-inside mt-1 space-y-0.5 pl-2 text-[10px]">
-                <li><strong className="text-black">VITE_LLM_API_KEY</strong>{language === 'zh' ? '：本地默认 API Key' : ': default API Key for local builds'}</li>
-                <li><strong className="text-black">VITE_LLM_BASE_URL</strong>{language === 'zh' ? '：默认 OpenAI 兼容 BaseURL' : ': default OpenAI-compatible BaseURL'}</li>
-                <li><strong className="text-black">VITE_LLM_ENDPOINT_PATH</strong>{language === 'zh' ? '：默认 ENDPOINT_PATH' : ': default ENDPOINT_PATH'}</li>
-                <li><strong className="text-black">VITE_LLM_MODEL</strong>{language === 'zh' ? '：默认 Model 名称' : ': default Model name'}</li>
+                <li><strong className="text-black">VITE_LLM_API_KEY</strong>{language === 'zh' ? '：本地注入 API Key' : ': local API Key injection'}</li>
+                <li><strong className="text-black">VITE_LLM_BASE_URL</strong>{language === 'zh' ? '：本地注入 BaseURL' : ': local BaseURL injection'}</li>
+                <li><strong className="text-black">VITE_LLM_ENDPOINT_PATH</strong>{language === 'zh' ? '：本地注入 ENDPOINT_PATH' : ': local ENDPOINT_PATH injection'}</li>
+                <li><strong className="text-black">VITE_LLM_MODEL</strong>{language === 'zh' ? '：本地注入 Model' : ': local Model injection'}</li>
               </ul>
             </div>
           </div>
